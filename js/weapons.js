@@ -163,7 +163,7 @@ const WEAPONS = [
     id: 'censer', name: 'Holy Censer', classId: 'cleric', type: 'orbital', cooldown: 0.7,
     unlock: { type: 'gold', cost: 160 },
     desc: 'Censers of holy flame orbit and scorch the unworthy.',
-    init(p) { p.orbital = { count: 2, mult: 0.55, dist: 74, speed: 2.4, r: 14, color: '#fff3c4' }; },
+    init(p) { p.orbitGroups.push({ key: 'weapon', count: 2, mult: 0.55, dist: 74, speed: 2.4, r: 14, color: '#fff3c4', orbs: [] }); },
     fire() {},
   },
 
@@ -172,7 +172,7 @@ const WEAPONS = [
     id: 'whirlwind_axe', name: 'Whirlwind Axe', classId: 'barbarian', type: 'orbital', cooldown: 0.7,
     unlock: { type: 'default' },
     desc: 'Axes whirl around you, cleaving anything close.',
-    init(p) { p.orbital = { count: 2, mult: 0.6, dist: 64, speed: 3.0, r: 16, color: '#e2655a' }; },
+    init(p) { p.orbitGroups.push({ key: 'weapon', count: 2, mult: 0.6, dist: 64, speed: 3.0, r: 16, color: '#e2655a', orbs: [] }); },
     fire() {},
   },
   {

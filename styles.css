@@ -196,7 +196,41 @@ h3 { font-size: 17px; color: var(--ink); letter-spacing: 0.5px; }
 .card:active { transform: translateY(1px); }
 .card h3 { color: var(--gold-bright); margin-bottom: 3px; }
 .card p { font-size: 13px; color: var(--ink); }
-.card .rank { font-size: 11px; color: var(--muted); display: block; margin-top: 4px; }
+.card h3 .new { font-size: 10px; color: #1a1308; background: var(--gold-bright); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
+.card h3 .rank { font-size: 11px; color: var(--gold); font-weight: normal; }
+.card .kind { font-size: 11px; color: var(--muted); display: block; margin-top: 4px; }
+
+/* ── In-game: movement-ability buttons ─────────────────────────────────────── */
+#ability-buttons {
+  position: fixed;
+  right: calc(env(safe-area-inset-right) + 16px);
+  bottom: calc(env(safe-area-inset-bottom) + 26px);
+  z-index: 11;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 12px;
+}
+.ability-btn {
+  position: relative;
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: radial-gradient(circle at 35% 30%, var(--stone-2), #100d09);
+  color: var(--gold-bright);
+  font-size: 26px;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+  touch-action: none;
+  opacity: 0.65;
+}
+.ability-btn.ready { opacity: 1; box-shadow: 0 0 12px rgba(240, 200, 105, 0.6); }
+.ability-btn .ab-icon { position: relative; z-index: 1; line-height: 64px; }
+/* Radial cooldown sweep driven by --cd (1 = full cooldown, 0 = ready) */
+.ability-btn .ab-cd {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(rgba(0, 0, 0, 0.62) calc(var(--cd, 0) * 360deg), transparent 0);
+}
 
 .unlocks-note { color: var(--gold-bright); font-size: 14px; line-height: 1.5; }
 
