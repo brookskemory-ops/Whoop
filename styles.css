@@ -234,6 +234,27 @@ h3 { font-size: 17px; color: var(--ink); letter-spacing: 0.5px; }
 
 .unlocks-note { color: var(--gold-bright); font-size: 14px; line-height: 1.5; }
 
+/* ── Boss health bar ───────────────────────────────────────────────────────── */
+#boss-bar-wrap {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 58px);
+  left: 50%; transform: translateX(-50%);
+  width: min(86vw, 440px);
+  z-index: 11;
+  text-align: center;
+  pointer-events: none;
+}
+#boss-name {
+  display: block;
+  font-size: 13px; font-weight: bold; letter-spacing: 2px;
+  color: var(--blood); text-shadow: 0 1px 3px #000; margin-bottom: 3px;
+  text-transform: uppercase;
+}
+.bar-bg.boss { height: 14px; border-color: #6e2a2a; }
+.bar.boss-fill { background: linear-gradient(180deg, #e0635a, #8a1f1f); transition: width 0.1s linear; }
+
+.win { color: var(--gold-bright); text-shadow: 0 2px 10px rgba(240, 200, 105, 0.5), 0 2px 6px #000; }
+
 /* ── Pause button + settings ───────────────────────────────────────────────── */
 #pause-btn {
   position: fixed;

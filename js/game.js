@@ -43,20 +43,25 @@
 
   // ── DOM ───────────────────────────────────────────────────────────────────
   const el = (id) => document.getElementById(id);
-  const screens = ['title-screen', 'class-screen', 'shop-screen', 'ach-screen', 'levelup-screen', 'gameover-screen', 'pause-screen', 'settings-screen'];
+  const screens = ['title-screen', 'class-screen', 'shop-screen', 'ach-screen', 'levelup-screen', 'gameover-screen', 'pause-screen', 'settings-screen', 'victory-screen'];
   function showScreen(id) {
     for (const s of screens) el(s).classList.toggle('hidden', s !== id);
     const playing = id === null;
     el('hud').classList.toggle('hidden', !playing);
     el('ability-buttons').classList.toggle('hidden', !playing);
     el('pause-btn').classList.toggle('hidden', !playing);
+    if (!playing) el('boss-bar-wrap').classList.add('hidden');
   }
 
   // ── Run state ─────────────────────────────────────────────────────────────
   let state = 'title';
-  let rng, player, enemies, projectiles, gems, particles, effects, floaters;
+  let rng, player, enemies, projectiles, enemyProjectiles, gems, particles, effects, floaters;
   let elapsed, spawnTimer, lastTime, runGold, runKills, enemyId;
   let shake = 0, flash = 0, lastBeat = 0, torchFlicker = 0;
+  let bossEnemy = null, nextMini = 0, finalSpawned = false, bannerText = '', bannerTimer = 0;
+  // Localhost-only fast timeline for testing (inert in production / on Pages).
+  const DEV_FAST = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).has('fast');
+  const WIN_TIME = DEV_FAST ? 12 : 600, MINI_TIMES = DEV_FAST ? [3, 6, 9] : [180, 360, 540];
   let selectedClass = 'knight', selectedWeapon = 'arming_sword';
   const input = { dx: 0, dy: 0 };
   const keys = {};
@@ -131,9 +136,13 @@
   }
   function killEnemy(e) {
     if (e.dead) return;
-    e.dead = true; runKills++; addShake(1.5); SFX.sfx('enemyDie');
-    particles.push(...burst(e.x, e.y, e.color, 12));
-    gems.push({ x: e.x, y: e.y, xp: e.xp, gold: e.gold, r: 5 });
+    e.dead = true; runKills++; addShake(e.boss ? 6 : 1.5); SFX.sfx('enemyDie');
+    particles.push(...burst(e.x, e.y, e.color, e.boss ? 40 : 12));
+    if (window.onEnemyDeath) window.onEnemyDeath(e, makeEnemyCtx());
+    if (e === bossEnemy) bossEnemy = null;
+    if (e.final) { victory(); return; }
+    if (e.boss) { player.hp = Math.min(player.maxHp, player.hp + 25); showBanner('Champion Slain!'); gems.push({ x: e.x, y: e.y, xp: e.xp, gold: e.gold, r: 8 }); }
+    else gems.push({ x: e.x, y: e.y, xp: e.xp, gold: e.gold, r: 5 });
   }
   function burst(x, y, color, count) {
     const out = [];
@@ -144,8 +153,9 @@
   function startRun(seed) {
     rng = new RNG(seed);
     player = createPlayer(selectedClass, selectedWeapon);
-    enemies = []; projectiles = []; gems = []; particles = []; effects = []; floaters = [];
+    enemies = []; projectiles = []; enemyProjectiles = []; gems = []; particles = []; effects = []; floaters = [];
     elapsed = 0; spawnTimer = 0; runGold = 0; runKills = 0; enemyId = 0; shake = 0; flash = 0; lastBeat = 0;
+    bossEnemy = null; nextMini = 0; finalSpawned = false; bannerText = ''; bannerTimer = 0;
     pendingUnlocks = [];
     state = 'playing'; showScreen(null);
     el('seed-label').textContent = `seed: ${seed}`;
@@ -154,16 +164,55 @@
     lastTime = performance.now(); requestAnimationFrame(loop);
   }
 
+  const enemyScale = () => 1 + (elapsed / 60) * 0.35;
+  const bossScale = () => 1 + (elapsed / 60) * 0.06;
+
+  // Spawn director: archetype mix ramps over the run; occasional elites.
   function spawnEnemy() {
-    const ang = rng.float() * TAU, dist = Math.max(W, H) * 0.6 + 40, minutes = elapsed / 60;
-    const tier = rng.weighted([{ value: 'skeleton', weight: 10 }, { value: 'goblin', weight: 3 + minutes }, { value: 'ogre', weight: minutes }]);
-    const base = {
-      skeleton: { r: 12, hp: 18, speed: 70, dmg: 8, color: '#d6d3c4', gold: 1, xp: 1 },
-      goblin: { r: 10, hp: 12, speed: 132, dmg: 6, color: '#7bbf63', gold: 1, xp: 1 },
-      ogre: { r: 20, hp: 70, speed: 48, dmg: 16, color: '#9b59b6', gold: 3, xp: 3 },
-    }[tier];
-    const scale = 1 + minutes * 0.35;
-    enemies.push({ _id: ++enemyId, type: tier, x: player.x + Math.cos(ang) * dist, y: player.y + Math.sin(ang) * dist, r: base.r, hp: base.hp * scale, maxHp: base.hp * scale, speed: base.speed, dmg: base.dmg, color: base.color, gold: base.gold, xp: base.xp, hitFlash: 0, slowUntil: 0, burn: null, facing: 0 });
+    const ang = rng.float() * TAU, dist = Math.max(W, H) * 0.6 + 40, m = elapsed / 60;
+    const key = rng.weighted([
+      { value: 'skeleton', weight: 10 },
+      { value: 'goblin', weight: 3 + m },
+      { value: 'ogre', weight: Math.max(0, m - 0.5) },
+      { value: 'shooter', weight: Math.max(0, m - 1) * 1.2 },
+      { value: 'exploder', weight: Math.max(0, m - 1.5) * 1.1 },
+      { value: 'splitter', weight: Math.max(0, m - 2) },
+      { value: 'charger', weight: Math.max(0, m - 2.5) },
+    ]);
+    const e = makeEnemy(key, player.x + Math.cos(ang) * dist, player.y + Math.sin(ang) * dist, enemyScale());
+    if (m > 1 && rng.float() < 0.06) { e.elite = true; e.hp *= 3.2; e.maxHp = e.hp; e.r *= 1.3; e.dmg *= 1.4; e.gold *= 4; e.xp *= 3; }
+    e._id = ++enemyId;
+    enemies.push(e);
+  }
+
+  function spawnBoss(key) {
+    const ang = rng.float() * TAU, dist = Math.max(W, H) * 0.55 + 60;
+    const e = makeEnemy(key, player.x + Math.cos(ang) * dist, player.y + Math.sin(ang) * dist, bossScale());
+    e._id = ++enemyId; enemies.push(e); bossEnemy = e;
+    flash = 0.6; addShake(8); SFX.sfx('levelup');
+    showBanner(key === 'finalboss' ? 'The Warden Awakens' : 'A Champion Approaches');
+  }
+  function showBanner(text) { bannerText = text; bannerTimer = 2.6; }
+
+  // Player damage from any source (contact, enemy projectiles, explosions).
+  function applyPlayerDamage(amt) {
+    if (player.invuln > 0) return;
+    player.hp -= amt; player.invuln = 0.6; addShake(7); SFX.sfx('hurt');
+    particles.push(...burst(player.x, player.y, '#ff5555', 8));
+    if (player.hp <= 0) die();
+  }
+
+  // ctx given to enemy AI / death effects.
+  function makeEnemyCtx() {
+    return {
+      player, rng, elapsed,
+      hurtPlayer: (amt) => applyPlayerDamage(amt),
+      hurtArea: (x, y, r, amt) => { if ((player.x - x) ** 2 + (player.y - y) ** 2 < (r + player.r) ** 2) applyPlayerDamage(amt); },
+      spawnEnemyProjectile: (o) => { enemyProjectiles.push(Object.assign({ x: 0, y: 0, vx: 0, vy: 0, r: 6, dmg: 8, color: '#ff7a5a', life: 3 }, o)); },
+      addEnemy: (key, x, y) => { const ne = makeEnemy(key, x, y, enemyScale()); ne._id = ++enemyId; enemies.push(ne); },
+      addEffect: (e) => { e.maxLife = e.maxLife || e.life; effects.push(e); },
+      addShake,
+    };
   }
 
   function ownedRanks() { const m = {}; for (const s of player.skills) m[s.id] = s.rank; return m; }
@@ -228,6 +277,18 @@
     showScreen('gameover-screen');
   }
 
+  function victory() {
+    state = 'won'; SFX.stopMusic(); SFX.sfx('levelup');
+    meta.gold += runGold; meta.totalKills += runKills;
+    meta.classKills[player.classId] = (meta.classKills[player.classId] || 0) + runKills;
+    if (elapsed > meta.bestTime) meta.bestTime = elapsed;
+    checkRunAchievements(); saveMeta();
+    el('win-time').textContent = fmtTime(elapsed);
+    el('win-gold').textContent = `+${runGold} gold · ${runKills} slain`;
+    el('win-unlocks').innerHTML = pendingUnlocks.length ? '<b>Unlocked!</b><br>' + pendingUnlocks.map((a) => `${a.name} — ${a.unlocks}`).join('<br>') : '';
+    showScreen('victory-screen');
+  }
+
   // ── Update ────────────────────────────────────────────────────────────────
   function update(dt) {
     elapsed += dt;
@@ -272,12 +333,21 @@
       else if (def.kind === 'movement') { if (s.timer > 0) s.timer -= dt; }
     }
 
-    // Spawning
-    spawnTimer -= dt;
-    const interval = Math.max(0.16, 1.1 - elapsed * 0.01);
-    if (spawnTimer <= 0) { spawnEnemy(); spawnTimer = interval; }
+    // Spawn director (normal spawns pause during the final boss)
+    if (!(bossEnemy && bossEnemy.final)) {
+      spawnTimer -= dt;
+      const interval = Math.max(0.16, 1.1 - elapsed * 0.01);
+      if (spawnTimer <= 0) { spawnEnemy(); spawnTimer = interval; }
+    }
+    while (nextMini < MINI_TIMES.length && elapsed >= MINI_TIMES[nextMini]) { spawnBoss('miniboss'); nextMini++; }
+    if (!finalSpawned && elapsed >= WIN_TIME) { spawnBoss('finalboss'); finalSpawned = true; }
+    if (bannerTimer > 0) bannerTimer -= dt;
 
     for (const p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    for (const p of enemyProjectiles) {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      if (p.life > 0 && player.invuln <= 0 && (p.x - player.x) ** 2 + (p.y - player.y) ** 2 < (p.r + player.r) ** 2) { applyPlayerDamage(p.dmg); p.life = 0; if (state !== 'playing') return; }
+    }
 
     // Orbit groups
     for (const g of player.orbitGroups) {
@@ -298,19 +368,18 @@
       }
     }
 
-    // Enemies
+    // Enemies (behavior driven by archetype AI)
+    const ectx = makeEnemyCtx();
     for (const e of enemies) {
       if (e.hp <= 0) continue;
-      const slowed = e.slowUntil > elapsed ? 0.5 : 1;
-      const a = Math.atan2(player.y - e.y, player.x - e.x); e.facing = a;
-      e.x += Math.cos(a) * e.speed * slowed * dt; e.y += Math.sin(a) * e.speed * slowed * dt;
+      tickEnemyAI(e, ectx, dt);
       if (e.hitFlash > 0) e.hitFlash -= dt;
       if (e.burn && e.burn.until > elapsed) { e.hp -= e.burn.dps * dt; if (e.hp <= 0) { killEnemy(e); continue; } }
+      if (e.hp <= 0) { killEnemy(e); continue; } // e.g. exploder self-detonation
       if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (e.r + player.r) ** 2 && player.invuln <= 0) {
-        player.hp -= e.dmg; player.invuln = 0.6; addShake(7); SFX.sfx('hurt');
         if (player.thorns) damageEnemy(e, player.thorns, false);
-        particles.push(...burst(player.x, player.y, '#ff5555', 8));
-        if (player.hp <= 0) { die(); return; }
+        applyPlayerDamage(e.dmg);
+        if (state !== 'playing') return;
       }
     }
 
@@ -340,6 +409,7 @@
     for (const f of floaters) { f.y += f.vy * dt; f.vy += 30 * dt; f.life -= dt; }
 
     projectiles = projectiles.filter((p) => p.life > 0);
+    enemyProjectiles = enemyProjectiles.filter((p) => p.life > 0);
     enemies = enemies.filter((e) => e.hp > 0 && !e.dead);
     gems = gems.filter((g) => !g.collected);
     particles = particles.filter((p) => p.life > 0);
@@ -350,6 +420,11 @@
     el('timer').textContent = fmtTime(elapsed);
     el('hp-bar').style.width = `${Math.max(0, (player.hp / player.maxHp) * 100)}%`;
     el('xp-bar').style.width = `${(player.xp / player.xpNext) * 100}%`;
+    if (bossEnemy && bossEnemy.hp > 0) {
+      el('boss-bar-wrap').classList.remove('hidden');
+      el('boss-name').textContent = bossEnemy.final ? 'The Warden' : 'Champion';
+      el('boss-bar').style.width = `${Math.max(0, (bossEnemy.hp / bossEnemy.maxHp) * 100)}%`;
+    } else el('boss-bar-wrap').classList.add('hidden');
     updateAbilityButtons();
   }
 
@@ -390,10 +465,13 @@
       if (d > litR * 1.04) { darkEnemies.push(e); continue; }
       blit(Art.enemySprite(e.type), e.x, e.y, e.facing);
       if (e.hitFlash > 0) { ctx.globalAlpha = e.hitFlash * 6; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; }
+      if (e.elite) { ctx.strokeStyle = 'rgba(255,210,90,0.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 4, 0, TAU); ctx.stroke(); }
+      if (e.telegraph) { ctx.strokeStyle = 'rgba(255,80,60,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6 + Math.sin(elapsed * 30) * 3, 0, TAU); ctx.stroke(); }
     }
 
-    // Projectiles
+    // Projectiles (player + enemy)
     for (const p of projectiles) blit(Art.projSprite(p.color, p.r, p.shape), p.x, p.y, Math.atan2(p.vy, p.vx));
+    for (const p of enemyProjectiles) blit(Art.projSprite(p.color, p.r, 'orb'), p.x, p.y, 0);
 
     // Orbitals
     for (const g of player.orbitGroups) for (const orb of g.orbs) { if (orb.x == null) continue; blit(Art.projSprite(g.color, g.r * 0.8, 'orb'), orb.x, orb.y, 0); }
@@ -451,6 +529,16 @@
     // Level-up / pickup flash
     if (flash > 0) { ctx.fillStyle = `rgba(255,250,230,${Math.min(0.5, flash) * 0.5})`; ctx.fillRect(0, 0, W, H); }
 
+    // Boss / event banner
+    if (bannerTimer > 0) {
+      ctx.globalAlpha = Math.min(1, bannerTimer / 0.5);
+      ctx.textAlign = 'center'; ctx.font = 'bold 26px Trebuchet MS, sans-serif';
+      ctx.fillStyle = '#f0c869'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4;
+      const by = H * 0.22;
+      ctx.strokeText(bannerText, W / 2, by); ctx.fillText(bannerText, W / 2, by);
+      ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+    }
+
     // Joystick
     if (joy.active) {
       ctx.globalAlpha = 0.85; ctx.strokeStyle = 'rgba(240,200,105,0.5)'; ctx.lineWidth = 3;
@@ -463,7 +551,9 @@
   function loop(now) {
     if (state !== 'playing') return;
     const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
-    update(dt);
+    const steps = DEV_FAST ? (window.__ironSteps | 0) : 0; // test-only fast-forward
+    if (steps > 1) { for (let i = 0; i < steps && state === 'playing'; i++) update(0.05); }
+    else update(dt);
     if (state === 'playing') { render(); requestAnimationFrame(loop); }
     else if (state === 'levelup' || state === 'paused') render();
   }
@@ -607,6 +697,7 @@
   el('class-back-btn').onclick = clk(() => showScreen('title-screen'));
   el('begin-btn').onclick = clk(() => { const daily = el('begin-btn').dataset.daily === '1'; startRun(daily ? dailySeed() : `run-${Date.now()}`); });
   el('restart-btn').onclick = clk(() => { refreshTitle(); showScreen('title-screen'); });
+  el('win-continue-btn').onclick = clk(() => { refreshTitle(); showScreen('title-screen'); });
   el('pause-btn').onclick = () => { SFX.sfx('uiClick'); togglePause(); };
   el('resume-btn').onclick = () => { SFX.sfx('uiClick'); showScreen(null); resume(); };
   el('quit-btn').onclick = clk(() => { state = 'title'; SFX.stopMusic(); refreshTitle(); showScreen('title-screen'); });

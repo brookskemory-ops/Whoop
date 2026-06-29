@@ -65,6 +65,12 @@ const Art = (() => {
       skeleton: { r: 12, body: '#d8d4c2', shade: '#9a9684', eye: '#cfeaff' },
       goblin: { r: 11, body: '#7bbf63', shade: '#4f8a3e', eye: '#ffe27a' },
       ogre: { r: 21, body: '#9b59b6', shade: '#6c3b80', eye: '#ff6a6a' },
+      shooter: { r: 12, body: '#6aa9ff', shade: '#3a6bb0', eye: '#eaf4ff' },
+      exploder: { r: 13, body: '#e8893a', shade: '#a65616', eye: '#fff0c0' },
+      splitter: { r: 16, body: '#caa24a', shade: '#8a6a22', eye: '#fff0c0' },
+      charger: { r: 15, body: '#d05a7a', shade: '#8c2f4c', eye: '#ffd0dc' },
+      miniboss: { r: 34, body: '#b14a8a', shade: '#6c2754', eye: '#ffd0f0' },
+      finalboss: { r: 48, body: '#c0341f', shade: '#7a160a', eye: '#ffd06a' },
     };
     const d = defs[type], R = d.r, S = R * 2 + 8, cx = S / 2, cy = S / 2;
     const c = make(S, S), g = c.getContext('2d');
