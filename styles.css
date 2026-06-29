@@ -234,6 +234,41 @@ h3 { font-size: 17px; color: var(--ink); letter-spacing: 0.5px; }
 
 .unlocks-note { color: var(--gold-bright); font-size: 14px; line-height: 1.5; }
 
+/* ── Pause button + settings ───────────────────────────────────────────────── */
+#pause-btn {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 8px);
+  right: calc(env(safe-area-inset-right) + 12px);
+  z-index: 12;
+  width: 42px; height: 42px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  color: var(--gold-bright);
+  font-size: 14px; letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+#pause-btn:active { transform: translateY(1px); }
+
+.settings-row { display: flex; align-items: center; gap: 14px; color: var(--ink); font-size: 15px; }
+.settings-row label { min-width: 70px; text-align: right; color: var(--muted); }
+.slider {
+  -webkit-appearance: none; appearance: none;
+  width: 200px; height: 8px; border-radius: 4px;
+  background: var(--stone); border: 1px solid var(--border); outline: none;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border: 1px solid #8a6a2c; cursor: pointer;
+}
+.slider::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--gold); border: 1px solid #8a6a2c; cursor: pointer;
+}
+
 #seed-label {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom) + 6px);

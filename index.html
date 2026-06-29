@@ -33,6 +33,7 @@
       <button id="daily-btn" class="btn">Daily Challenge</button>
       <button id="shop-btn" class="btn">Armory (Shop)</button>
       <button id="ach-btn" class="btn">Deeds (Achievements)</button>
+      <button id="settings-btn" class="btn">Settings</button>
     </div>
     <div class="stats">
       <span>Best: <b id="best-time">0:00</b></span>
@@ -75,6 +76,23 @@
     <div id="upgrade-cards"></div>
   </div>
 
+  <!-- Settings (from title) -->
+  <div id="settings-screen" class="screen hidden">
+    <h2>Settings</h2>
+    <div class="settings-row"><label for="vol-slider2">Volume</label><input id="vol-slider2" class="slider" type="range" min="0" max="100" value="70" /></div>
+    <button id="mute-btn2" class="btn">🔊 Sound On</button>
+    <button id="settings-back-btn" class="btn">Back</button>
+  </div>
+
+  <!-- Pause -->
+  <div id="pause-screen" class="screen overlay hidden">
+    <h2>Paused</h2>
+    <div class="settings-row"><label for="vol-slider">Volume</label><input id="vol-slider" class="slider" type="range" min="0" max="100" value="70" /></div>
+    <button id="mute-btn" class="btn">🔊 Sound On</button>
+    <button id="resume-btn" class="btn primary">Resume</button>
+    <button id="quit-btn" class="btn">Quit to Title</button>
+  </div>
+
   <!-- Game over -->
   <div id="gameover-screen" class="screen overlay hidden">
     <h2>You Have Fallen</h2>
@@ -87,6 +105,9 @@
   <!-- Manual movement-ability buttons (built at runtime) -->
   <div id="ability-buttons" class="hidden"></div>
 
+  <!-- Pause button (shown during play) -->
+  <button id="pause-btn" class="hidden">❚❚</button>
+
   <span id="seed-label"></span>
 
   <script src="js/rng.js"></script>
@@ -94,6 +115,8 @@
   <script src="js/weapons.js"></script>
   <script src="js/abilities.js"></script>
   <script src="js/achievements.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

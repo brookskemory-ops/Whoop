@@ -58,7 +58,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed, vy: Math.sin(a) * p.projectileSpeed,
-        dmg: p.damage * mult, crit, pierce: p.pierce + 1, r: p.projectileSize, color: '#cdeccd',
+        dmg: p.damage * mult, crit, pierce: p.pierce + 1, r: p.projectileSize, color: '#cdeccd', shape: 'arrow',
       });
     },
   },
@@ -72,7 +72,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed * 1.25, vy: Math.sin(a) * p.projectileSpeed * 1.25,
-        dmg: p.damage * mult, crit, pierce: p.pierce + 3, r: p.projectileSize * 0.9, color: '#a9e6b4',
+        dmg: p.damage * mult, crit, pierce: p.pierce + 3, r: p.projectileSize * 0.9, color: '#a9e6b4', shape: 'arrow',
       });
     },
   },
@@ -88,7 +88,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed * 0.8, vy: Math.sin(a) * p.projectileSpeed * 0.8,
-        dmg: p.damage * mult, crit, pierce: 0, r: p.projectileSize * 1.3, color: '#ff9a4a',
+        dmg: p.damage * mult, crit, pierce: 0, r: p.projectileSize * 1.3, color: '#ff9a4a', shape: 'orb',
         onHit: (hx, hy, c) => {
           c.areaDamage(hx, hy, 60 * p.aoeMult, 0.8, { color: '#ff7a2a' });
           c.addEffect({ type: 'ring', x: hx, y: hy, r: 6, maxR: 60 * p.aoeMult, life: 0.3, color: '#ff7a2a' });
@@ -120,7 +120,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed * 1.1, vy: Math.sin(a) * p.projectileSpeed * 1.1,
-        dmg: p.damage * mult, crit, pierce: p.pierce, r: p.projectileSize * 0.8, color: '#f4dd8a',
+        dmg: p.damage * mult, crit, pierce: p.pierce, r: p.projectileSize * 0.8, color: '#f4dd8a', shape: 'blade',
       });
     },
   },
@@ -138,7 +138,7 @@ const WEAPONS = [
         const { mult, crit } = critRoll(ctx);
         ctx.spawnProjectile({
           vx: Math.cos(a) * p.projectileSpeed, vy: Math.sin(a) * p.projectileSpeed,
-          dmg: p.damage * mult, crit, pierce: p.pierce, r: p.projectileSize * 0.8, color: '#f4dd8a',
+          dmg: p.damage * mult, crit, pierce: p.pierce, r: p.projectileSize * 0.8, color: '#f4dd8a', shape: 'blade',
         });
       }
     },
@@ -155,7 +155,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed, vy: Math.sin(a) * p.projectileSpeed,
-        dmg: p.damage * 1.1 * mult, crit, pierce: p.pierce + 1, r: p.projectileSize, color: '#fff3c4',
+        dmg: p.damage * 1.1 * mult, crit, pierce: p.pierce + 1, r: p.projectileSize, color: '#fff3c4', shape: 'bolt',
       });
     },
   },
@@ -185,8 +185,7 @@ const WEAPONS = [
       const { mult, crit } = critRoll(ctx);
       ctx.spawnProjectile({
         vx: Math.cos(a) * p.projectileSpeed * 0.85, vy: Math.sin(a) * p.projectileSpeed * 0.85,
-        dmg: p.damage * 1.8 * mult, crit, pierce: p.pierce + 2, r: p.projectileSize * 1.4, color: '#d98c5a',
-        spin: true,
+        dmg: p.damage * 1.8 * mult, crit, pierce: p.pierce + 2, r: p.projectileSize * 1.4, color: '#d98c5a', shape: 'axe',
       });
     },
   },

@@ -1,14 +1,14 @@
 // ── Ironvow ────────────────────────────────────────────────────────────────
-// A medieval survivor-like roguelite. Floating joystick for movement, a class
-// weapon that auto-attacks, ACTIVE abilities you gain & rank up (attacks auto-fire,
-// movement skills fire from on-screen buttons), escalating hordes, meta-progression.
+// Medieval survivor-like roguelite. This file wires together input (joystick +
+// ability buttons), the class weapon + active abilities, hordes, meta-progression,
+// and the look-&-feel layer: procedural sprites, torch lighting, juice, and audio.
 
 (function () {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const TAU = Math.PI * 2;
+  const SFX = window.GameAudio;
 
-  // ── Canvas sizing ─────────────────────────────────────────────────────────
   let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -25,13 +25,13 @@
   function loadMeta() {
     let m = {};
     try { m = JSON.parse(localStorage.getItem(META_KEY)) || {}; } catch {}
-    m.gold = m.gold || 0;
-    m.bestTime = m.bestTime || 0;
+    m.gold = m.gold || 0; m.bestTime = m.bestTime || 0;
     m.unlockedClasses = m.unlockedClasses || { knight: true };
     m.unlockedWeapons = m.unlockedWeapons || {};
     m.achievements = m.achievements || {};
-    m.totalKills = m.totalKills || 0;
-    m.classKills = m.classKills || {};
+    m.totalKills = m.totalKills || 0; m.classKills = m.classKills || {};
+    m.volume = m.volume == null ? 0.7 : m.volume;
+    m.muted = !!m.muted;
     for (const w of WEAPONS) if (w.unlock.type === 'default') m.unlockedWeapons[w.id] = true;
     for (const c of CLASSES) if (c.unlock.type === 'default') m.unlockedClasses[c.id] = true;
     return m;
@@ -43,18 +43,20 @@
 
   // ── DOM ───────────────────────────────────────────────────────────────────
   const el = (id) => document.getElementById(id);
-  const screens = ['title-screen', 'class-screen', 'shop-screen', 'ach-screen', 'levelup-screen', 'gameover-screen'];
+  const screens = ['title-screen', 'class-screen', 'shop-screen', 'ach-screen', 'levelup-screen', 'gameover-screen', 'pause-screen', 'settings-screen'];
   function showScreen(id) {
     for (const s of screens) el(s).classList.toggle('hidden', s !== id);
     const playing = id === null;
     el('hud').classList.toggle('hidden', !playing);
     el('ability-buttons').classList.toggle('hidden', !playing);
+    el('pause-btn').classList.toggle('hidden', !playing);
   }
 
   // ── Run state ─────────────────────────────────────────────────────────────
   let state = 'title';
-  let rng, player, enemies, projectiles, gems, particles, effects;
+  let rng, player, enemies, projectiles, gems, particles, effects, floaters;
   let elapsed, spawnTimer, lastTime, runGold, runKills, enemyId;
+  let shake = 0, flash = 0, lastBeat = 0, torchFlicker = 0;
   let selectedClass = 'knight', selectedWeapon = 'arming_sword';
   const input = { dx: 0, dy: 0 };
   const keys = {};
@@ -66,52 +68,39 @@
     projectileCount: 1, projectileSpeed: 420, projectileSize: 6, pierce: 0,
     crit: 0, critMult: 2, lifesteal: 0, pickupRange: 75,
     aoeMult: 1, thorns: 0, burnOnHit: 0, slowOnHit: false, holyAura: 0,
-    level: 1, xp: 0, xpNext: 5, invuln: 0,
+    level: 1, xp: 0, xpNext: 5, invuln: 0, facing: 0,
   };
 
   function createPlayer(classId, weaponId) {
     const cls = CLASS_BY_ID[classId];
     const p = Object.assign({}, DEFAULTS, cls.baseStats);
-    p.x = 0; p.y = 0;
-    p.classId = classId; p.weaponId = weaponId;
-    p.skills = [];          // active abilities: { id, rank, timer }
-    p.orbitGroups = [];     // persistent spinning rings (weapon + orbit abilities)
-    p.dash = null;          // active dash movement
-    p.attackTimer = 0;
+    p.x = 0; p.y = 0; p.classId = classId; p.weaponId = weaponId;
+    p.skills = []; p.orbitGroups = []; p.dash = null; p.attackTimer = 0;
     const w = WEAPON_BY_ID[weaponId];
-    p.attackCooldown = w.cooldown || 0.6;
-    p.hp = p.maxHp;
+    p.attackCooldown = w.cooldown || 0.6; p.hp = p.maxHp;
     if (w.init) w.init(p);
     return p;
   }
 
-  // ── Helpers / ctx ─────────────────────────────────────────────────────────
   function nearestEnemy(x, y) {
     let best = null, bd = Infinity;
     for (const e of enemies) { const d = (e.x - x) ** 2 + (e.y - y) ** 2; if (d < bd) { bd = d; best = e; } }
     return best;
   }
-  function moveDir() {
-    let x = input.dx, y = input.dy; const m = Math.hypot(x, y);
-    return m > 0.1 ? { x: x / m, y: y / m } : { x: 0, y: 0 };
-  }
+  function moveDir() { let x = input.dx, y = input.dy; const m = Math.hypot(x, y); return m > 0.1 ? { x: x / m, y: y / m } : { x: 0, y: 0 }; }
   function applyEnemyEffects(e) {
     if (player.burnOnHit) e.burn = { dps: player.burnOnHit, until: elapsed + 3 };
     if (player.slowOnHit) e.slowUntil = elapsed + 1.5;
   }
+  function addShake(n) { shake = Math.min(16, shake + n); }
+
   function makeCtx() {
     return {
       player, rng, enemies, elapsed, moveDir: moveDir(),
       nearest: () => nearestEnemy(player.x, player.y),
-      dirToNearest() {
-        const t = nearestEnemy(player.x, player.y);
-        return t ? Math.atan2(t.y - player.y, t.x - player.x) : rng.float() * TAU;
-      },
+      dirToNearest() { const t = nearestEnemy(player.x, player.y); return t ? Math.atan2(t.y - player.y, t.x - player.x) : rng.float() * TAU; },
       spawnProjectile(o) {
-        projectiles.push(Object.assign({
-          x: player.x, y: player.y, vx: 0, vy: 0, r: 6, dmg: player.damage,
-          pierce: player.pierce, life: 1.5, color: '#ffe27a', crit: false, onHit: null, spin: false, rot: 0,
-        }, o));
+        projectiles.push(Object.assign({ x: player.x, y: player.y, vx: 0, vy: 0, r: 6, dmg: player.damage, pierce: player.pierce, life: 1.5, color: '#ffe27a', crit: false, onHit: null, shape: 'orb' }, o));
       },
       areaDamage(x, y, radius, mult, opts = {}) {
         const dmg = player.damage * mult;
@@ -119,8 +108,7 @@
           if (e.hp <= 0) continue;
           const dx = e.x - x, dy = e.y - y;
           if (dx * dx + dy * dy <= (radius + e.r) ** 2) {
-            damageEnemy(e, dmg, opts.crit);
-            applyEnemyEffects(e);
+            damageEnemy(e, dmg, opts.crit); applyEnemyEffects(e);
             if (opts.slow) e.slowUntil = elapsed + opts.slow;
             if (opts.knockback) { const d = Math.hypot(dx, dy) || 1; e.x += (dx / d) * opts.knockback * 0.06; e.y += (dy / d) * opts.knockback * 0.06; }
           }
@@ -135,12 +123,15 @@
     e.hp -= dmg; e.hitFlash = 0.1;
     particles.push(...burst(e.x, e.y, '#ffffff', 3));
     if (crit) particles.push(...burst(e.x, e.y, '#ffd34d', 4));
+    floaters.push({ x: e.x + (rng.float() - 0.5) * 8, y: e.y - e.r, vy: -34, life: 0.7, maxLife: 0.7, text: String(Math.max(1, Math.round(dmg))), crit });
+    if (floaters.length > 48) floaters.shift();
+    SFX.sfx(crit ? 'crit' : 'hit');
     if (rng.float() < player.lifesteal) player.hp = Math.min(player.maxHp, player.hp + 2);
     if (e.hp <= 0) killEnemy(e);
   }
   function killEnemy(e) {
     if (e.dead) return;
-    e.dead = true; runKills++;
+    e.dead = true; runKills++; addShake(1.5); SFX.sfx('enemyDie');
     particles.push(...burst(e.x, e.y, e.color, 12));
     gems.push({ x: e.x, y: e.y, xp: e.xp, gold: e.gold, r: 5 });
   }
@@ -150,43 +141,31 @@
     return out;
   }
 
-  // ── Start run ─────────────────────────────────────────────────────────────
   function startRun(seed) {
     rng = new RNG(seed);
     player = createPlayer(selectedClass, selectedWeapon);
-    enemies = []; projectiles = []; gems = []; particles = []; effects = [];
-    elapsed = 0; spawnTimer = 0; runGold = 0; runKills = 0; enemyId = 0;
+    enemies = []; projectiles = []; gems = []; particles = []; effects = []; floaters = [];
+    elapsed = 0; spawnTimer = 0; runGold = 0; runKills = 0; enemyId = 0; shake = 0; flash = 0; lastBeat = 0;
     pendingUnlocks = [];
-    state = 'playing';
-    showScreen(null);
+    state = 'playing'; showScreen(null);
     el('seed-label').textContent = `seed: ${seed}`;
     refreshAbilityButtons();
-    lastTime = performance.now();
-    requestAnimationFrame(loop);
+    SFX.ensure(); SFX.startMusic();
+    lastTime = performance.now(); requestAnimationFrame(loop);
   }
 
-  // ── Enemies ───────────────────────────────────────────────────────────────
   function spawnEnemy() {
     const ang = rng.float() * TAU, dist = Math.max(W, H) * 0.6 + 40, minutes = elapsed / 60;
-    const tier = rng.weighted([
-      { value: 'skeleton', weight: 10 },
-      { value: 'goblin', weight: 3 + minutes },
-      { value: 'ogre', weight: minutes },
-    ]);
+    const tier = rng.weighted([{ value: 'skeleton', weight: 10 }, { value: 'goblin', weight: 3 + minutes }, { value: 'ogre', weight: minutes }]);
     const base = {
       skeleton: { r: 12, hp: 18, speed: 70, dmg: 8, color: '#d6d3c4', gold: 1, xp: 1 },
       goblin: { r: 10, hp: 12, speed: 132, dmg: 6, color: '#7bbf63', gold: 1, xp: 1 },
       ogre: { r: 20, hp: 70, speed: 48, dmg: 16, color: '#9b59b6', gold: 3, xp: 3 },
     }[tier];
     const scale = 1 + minutes * 0.35;
-    enemies.push({
-      _id: ++enemyId, x: player.x + Math.cos(ang) * dist, y: player.y + Math.sin(ang) * dist,
-      r: base.r, hp: base.hp * scale, maxHp: base.hp * scale, speed: base.speed,
-      dmg: base.dmg, color: base.color, gold: base.gold, xp: base.xp, hitFlash: 0, slowUntil: 0, burn: null,
-    });
+    enemies.push({ _id: ++enemyId, type: tier, x: player.x + Math.cos(ang) * dist, y: player.y + Math.sin(ang) * dist, r: base.r, hp: base.hp * scale, maxHp: base.hp * scale, speed: base.speed, dmg: base.dmg, color: base.color, gold: base.gold, xp: base.xp, hitFlash: 0, slowUntil: 0, burn: null, facing: 0 });
   }
 
-  // ── Leveling & ability picks ──────────────────────────────────────────────
   function ownedRanks() { const m = {}; for (const s of player.skills) m[s.id] = s.rank; return m; }
   function gainXp(amount) {
     player.xp += amount;
@@ -205,18 +184,16 @@
     refreshAbilityButtons();
   }
   function openLevelUp() {
-    state = 'levelup';
+    state = 'levelup'; flash = 0.5; SFX.sfx('levelup');
     const choices = rollAbilities(rng, player.classId, ownedRanks(), 5);
     const wrap = el('upgrade-cards'); wrap.innerHTML = '';
     if (choices.length === 0) { player.hp = Math.min(player.maxHp, player.hp + 30); resume(); return; }
     for (const opt of choices) {
       const def = opt.ability;
-      const card = document.createElement('button');
-      card.className = 'card';
+      const card = document.createElement('button'); card.className = 'card';
       const tag = opt.isNew ? '<span class="new">NEW</span>' : `<span class="rank">Rank ${opt.nextRank - 1} → ${opt.nextRank}</span>`;
-      card.innerHTML = `<h3>${def.icon || ''} ${def.name} ${tag}</h3><p>${def.desc(opt.nextRank)}</p>` +
-        `<span class="kind">${def.kind === 'movement' ? '✋ tap to use' : def.kind === 'orbit' ? '↻ orbits you' : '⚔ auto'}</span>`;
-      card.onclick = () => { applyPick(opt); checkRunAchievements(); el('levelup-screen').classList.add('hidden'); resume(); };
+      card.innerHTML = `<h3>${def.icon || ''} ${def.name} ${tag}</h3><p>${def.desc(opt.nextRank)}</p><span class="kind">${def.kind === 'movement' ? '✋ tap to use' : def.kind === 'orbit' ? '↻ orbits you' : '⚔ auto'}</span>`;
+      card.onclick = () => { SFX.sfx('uiClick'); applyPick(opt); checkRunAchievements(); el('levelup-screen').classList.add('hidden'); resume(); };
       wrap.appendChild(card);
     }
     el('levelup-title').textContent = `Level ${player.level}`;
@@ -224,14 +201,8 @@
   }
   function resume() { state = 'playing'; lastTime = performance.now(); requestAnimationFrame(loop); }
 
-  // ── Achievements ──────────────────────────────────────────────────────────
   let pendingUnlocks = [];
-  function runStats() {
-    return {
-      time: elapsed, level: player.level, totalKills: meta.totalKills + runKills,
-      classKills: Object.assign({}, meta.classKills, { [player.classId]: (meta.classKills[player.classId] || 0) + runKills }),
-    };
-  }
+  function runStats() { return { time: elapsed, level: player.level, totalKills: meta.totalKills + runKills, classKills: Object.assign({}, meta.classKills, { [player.classId]: (meta.classKills[player.classId] || 0) + runKills }) }; }
   function applyUnlock(id) {
     if (id === 'survive_8') meta.unlockedClasses.cleric = true;
     if (id === 'level_15') meta.unlockedClasses.barbarian = true;
@@ -246,15 +217,14 @@
   }
 
   function die() {
-    state = 'dead';
+    state = 'dead'; SFX.stopMusic();
     meta.gold += runGold; meta.totalKills += runKills;
     meta.classKills[player.classId] = (meta.classKills[player.classId] || 0) + runKills;
     if (elapsed > meta.bestTime) meta.bestTime = elapsed;
     checkRunAchievements(); saveMeta();
     el('over-time').textContent = fmtTime(elapsed);
     el('over-gold').textContent = `+${runGold} gold · ${runKills} slain`;
-    el('over-unlocks').innerHTML = pendingUnlocks.length
-      ? '<b>Unlocked!</b><br>' + pendingUnlocks.map((a) => `${a.name} — ${a.unlocks}`).join('<br>') : '';
+    el('over-unlocks').innerHTML = pendingUnlocks.length ? '<b>Unlocked!</b><br>' + pendingUnlocks.map((a) => `${a.name} — ${a.unlocks}`).join('<br>') : '';
     showScreen('gameover-screen');
   }
 
@@ -262,45 +232,44 @@
   function update(dt) {
     elapsed += dt;
     const c = makeCtx();
+    if (shake > 0) shake = Math.max(0, shake - dt * 36);
+    if (flash > 0) flash = Math.max(0, flash - dt * 2);
 
-    // Dash movement (overrides joystick while active)
+    // Movement (dash overrides)
     if (player.dash) {
       const d = player.dash;
       player.x += d.vx * dt; player.y += d.vy * dt; d.time -= dt;
+      player.facing = Math.atan2(d.vy, d.vx);
       effects.push({ type: 'fade', x: player.x, y: player.y, r: player.r, life: 0.18, maxLife: 0.18, color: d.color });
-      if (d.hitMult) {
-        for (const e of enemies) {
-          if (e.hp <= 0 || d.hits.has(e._id)) continue;
-          if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (player.r + e.r + 6) ** 2) {
-            d.hits.add(e._id); damageEnemy(e, player.damage * d.hitMult, false); applyEnemyEffects(e);
-          }
-        }
-      }
+      if (d.hitMult) for (const e of enemies) { if (e.hp <= 0 || d.hits.has(e._id)) continue; if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (player.r + e.r + 6) ** 2) { d.hits.add(e._id); damageEnemy(e, player.damage * d.hitMult, false); applyEnemyEffects(e); } }
       if (d.time <= 0) player.dash = null;
     } else {
       const md = moveDir();
       player.x += md.x * player.speed * dt; player.y += md.y * player.speed * dt;
     }
+    // Facing: aim at nearest foe, else move direction
+    const aim = nearestEnemy(player.x, player.y);
+    if (aim) player.facing = Math.atan2(aim.y - player.y, aim.x - player.x);
+    else { const md = moveDir(); if (md.x || md.y) player.facing = Math.atan2(md.y, md.x); }
 
     if (player.regen) player.hp = Math.min(player.maxHp, player.hp + player.regen * dt);
     if (player.invuln > 0) player.invuln -= dt;
 
-    // Class weapon auto-attack
+    // Low-HP heartbeat
+    if (player.hp / player.maxHp < 0.3 && elapsed - lastBeat > 0.65) { lastBeat = elapsed; SFX.sfx('heartbeat'); }
+
+    // Class weapon
     const w = WEAPON_BY_ID[player.weaponId];
     if (w.fire && w.type !== 'orbital') {
       player.attackTimer -= dt;
-      if (player.attackTimer <= 0) { w.fire(c); player.attackTimer = player.attackCooldown; }
+      if (player.attackTimer <= 0) { w.fire(c); SFX.sfx('cast'); player.attackTimer = player.attackCooldown; }
     }
 
-    // Active ability skills: attacks auto-fire, movement timers tick down
+    // Active abilities
     for (const s of player.skills) {
       const def = ABILITIES_BY_ID[s.id];
-      if (def.kind === 'attack') {
-        s.timer -= dt;
-        if (s.timer <= 0) { def.activate(c, s.rank); s.timer = def.cooldown(s.rank); }
-      } else if (def.kind === 'movement') {
-        if (s.timer > 0) s.timer -= dt;
-      }
+      if (def.kind === 'attack') { s.timer -= dt; if (s.timer <= 0) { def.activate(c, s.rank); SFX.sfx('cast'); s.timer = def.cooldown(s.rank); } }
+      else if (def.kind === 'movement') { if (s.timer > 0) s.timer -= dt; }
     }
 
     // Spawning
@@ -308,8 +277,7 @@
     const interval = Math.max(0.16, 1.1 - elapsed * 0.01);
     if (spawnTimer <= 0) { spawnEnemy(); spawnTimer = interval; }
 
-    // Projectiles
-    for (const p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; if (p.spin) p.rot += dt * 14; }
+    for (const p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
 
     // Orbit groups
     for (const g of player.orbitGroups) {
@@ -317,19 +285,14 @@
       while (g.orbs.length > g.count) g.orbs.pop();
       const n = g.orbs.length;
       for (let i = 0; i < n; i++) {
-        const orb = g.orbs[i];
-        orb.angle += g.speed * dt;
+        const orb = g.orbs[i]; orb.angle += g.speed * dt;
         const a = orb.angle + (i * TAU) / n;
         orb.x = player.x + Math.cos(a) * g.dist; orb.y = player.y + Math.sin(a) * g.dist;
         for (const e of enemies) {
           if (e.hp <= 0) continue;
           if ((e.x - orb.x) ** 2 + (e.y - orb.y) ** 2 < (g.r + e.r) ** 2) {
             const last = orb.hits[e._id] || -1;
-            if (elapsed - last > 0.35) {
-              orb.hits[e._id] = elapsed;
-              const cr = rng.float() < player.crit;
-              damageEnemy(e, player.damage * g.mult * (cr ? player.critMult : 1), cr); applyEnemyEffects(e);
-            }
+            if (elapsed - last > 0.35) { orb.hits[e._id] = elapsed; const cr = rng.float() < player.crit; damageEnemy(e, player.damage * g.mult * (cr ? player.critMult : 1), cr); applyEnemyEffects(e); }
           }
         }
       }
@@ -339,19 +302,19 @@
     for (const e of enemies) {
       if (e.hp <= 0) continue;
       const slowed = e.slowUntil > elapsed ? 0.5 : 1;
-      const a = Math.atan2(player.y - e.y, player.x - e.x);
+      const a = Math.atan2(player.y - e.y, player.x - e.x); e.facing = a;
       e.x += Math.cos(a) * e.speed * slowed * dt; e.y += Math.sin(a) * e.speed * slowed * dt;
       if (e.hitFlash > 0) e.hitFlash -= dt;
       if (e.burn && e.burn.until > elapsed) { e.hp -= e.burn.dps * dt; if (e.hp <= 0) { killEnemy(e); continue; } }
       if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (e.r + player.r) ** 2 && player.invuln <= 0) {
-        player.hp -= e.dmg; player.invuln = 0.6;
+        player.hp -= e.dmg; player.invuln = 0.6; addShake(7); SFX.sfx('hurt');
         if (player.thorns) damageEnemy(e, player.thorns, false);
         particles.push(...burst(player.x, player.y, '#ff5555', 8));
         if (player.hp <= 0) { die(); return; }
       }
     }
 
-    // Projectile ↔ enemy
+    // Projectiles ↔ enemies
     for (const p of projectiles) {
       if (p.life <= 0) continue;
       for (const e of enemies) {
@@ -369,17 +332,19 @@
     for (const g of gems) {
       const d2 = (g.x - player.x) ** 2 + (g.y - player.y) ** 2;
       if (d2 < player.pickupRange ** 2) { const a = Math.atan2(player.y - g.y, player.x - g.x); g.x += Math.cos(a) * 340 * dt; g.y += Math.sin(a) * 340 * dt; }
-      if (d2 < (player.r + 7) ** 2) { g.collected = true; runGold += g.gold; gainXp(g.xp); }
+      if (d2 < (player.r + 7) ** 2) { g.collected = true; runGold += g.gold; SFX.sfx('pickup'); effects.push({ type: 'ring', x: player.x, y: player.y, r: 4, maxR: 22, life: 0.25, maxLife: 0.25, color: '#4ad6e8' }); gainXp(g.xp); }
     }
 
     for (const pt of particles) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt; }
     for (const ef of effects) ef.life -= dt;
+    for (const f of floaters) { f.y += f.vy * dt; f.vy += 30 * dt; f.life -= dt; }
 
     projectiles = projectiles.filter((p) => p.life > 0);
     enemies = enemies.filter((e) => e.hp > 0 && !e.dead);
     gems = gems.filter((g) => !g.collected);
     particles = particles.filter((p) => p.life > 0);
     effects = effects.filter((e) => e.life > 0);
+    floaters = floaters.filter((f) => f.life > 0);
 
     el('level-text').textContent = `Lv ${player.level}`;
     el('timer').textContent = fmtTime(elapsed);
@@ -389,65 +354,108 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+  function blit(spr, x, y, angle, scale) {
+    ctx.save(); ctx.translate(x, y); if (angle) ctx.rotate(angle); if (scale && scale !== 1) ctx.scale(scale, scale);
+    ctx.drawImage(spr.canvas, -spr.cx, -spr.cy); ctx.restore();
+  }
   function render() {
+    torchFlicker = Math.sin(elapsed * 9) * 5 + Math.sin(elapsed * 23) * 3;
+    const litR = Math.max(245, Math.min(W, H) * 0.6) + torchFlicker;
+    const sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0;
+    const camX = player.x - W / 2 + sx, camY = player.y - H / 2 + sy;
+
     ctx.fillStyle = '#15130f'; ctx.fillRect(0, 0, W, H);
-    const camX = player.x - W / 2, camY = player.y - H / 2;
     ctx.save(); ctx.translate(-camX, -camY);
 
-    ctx.strokeStyle = 'rgba(255,225,170,0.05)'; ctx.lineWidth = 1;
-    const grid = 60, gx = Math.floor(camX / grid) * grid, gy = Math.floor(camY / grid) * grid;
-    ctx.beginPath();
-    for (let x = gx; x < camX + W + grid; x += grid) { ctx.moveTo(x, camY); ctx.lineTo(x, camY + H); }
-    for (let y = gy; y < camY + H + grid; y += grid) { ctx.moveTo(camX, y); ctx.lineTo(camX + W, y); }
-    ctx.stroke();
+    // Floor texture
+    ctx.fillStyle = Art.floorPatternFor(ctx);
+    ctx.fillRect(camX, camY, W, H);
 
-    ctx.fillStyle = '#4ad6e8';
-    for (const g of gems) { ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, TAU); ctx.fill(); }
+    // Gems
+    for (const g of gems) { blit(Art.projSprite('#4ad6e8', g.r, 'orb'), g.x, g.y, 0); }
 
+    // Effects under units
     for (const ef of effects) {
       const al = Math.max(0, ef.life / ef.maxLife); ctx.globalAlpha = al;
-      if (ef.type === 'ring') {
-        const t = 1 - al; ctx.strokeStyle = ef.color; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r + (ef.maxR - ef.r) * t, 0, TAU); ctx.stroke();
-      } else if (ef.type === 'line') {
-        ctx.strokeStyle = ef.color; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(ef.x1, ef.y1); ctx.lineTo(ef.x2, ef.y2); ctx.stroke();
-      } else if (ef.type === 'fade') {
-        ctx.fillStyle = ef.color; ctx.globalAlpha = al * 0.4;
-        ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, TAU); ctx.fill();
-      }
+      if (ef.type === 'ring') { const t = 1 - al; ctx.strokeStyle = ef.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r + (ef.maxR - ef.r) * t, 0, TAU); ctx.stroke(); }
+      else if (ef.type === 'line') { ctx.strokeStyle = ef.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ef.x1, ef.y1); ctx.lineTo(ef.x2, ef.y2); ctx.stroke(); }
+      else if (ef.type === 'fade') { ctx.fillStyle = ef.color; ctx.globalAlpha = al * 0.4; ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, TAU); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
 
+    // Enemies — full sprite if lit, otherwise saved for eye-glow pass
+    const darkEnemies = [];
+    for (const e of enemies) {
+      const d = Math.hypot(e.x - player.x, e.y - player.y);
+      if (d > litR * 1.04) { darkEnemies.push(e); continue; }
+      blit(Art.enemySprite(e.type), e.x, e.y, e.facing);
+      if (e.hitFlash > 0) { ctx.globalAlpha = e.hitFlash * 6; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; }
+    }
+
+    // Projectiles
+    for (const p of projectiles) blit(Art.projSprite(p.color, p.r, p.shape), p.x, p.y, Math.atan2(p.vy, p.vx));
+
+    // Orbitals
+    for (const g of player.orbitGroups) for (const orb of g.orbs) { if (orb.x == null) continue; blit(Art.projSprite(g.color, g.r * 0.8, 'orb'), orb.x, orb.y, 0); }
+
+    // Particles
     for (const pt of particles) { ctx.globalAlpha = Math.max(0, pt.life / 0.4); ctx.fillStyle = pt.color; ctx.fillRect(pt.x - 2, pt.y - 2, 4, 4); }
     ctx.globalAlpha = 1;
 
-    for (const e of enemies) {
-      ctx.fillStyle = e.hitFlash > 0 ? '#fff' : (e.slowUntil > elapsed ? '#9fd8ff' : e.color);
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, TAU); ctx.fill();
+    // Damage numbers
+    ctx.textAlign = 'center';
+    for (const f of floaters) {
+      ctx.globalAlpha = Math.min(1, f.life / 0.4);
+      ctx.font = `bold ${f.crit ? 20 : 13}px Trebuchet MS, sans-serif`;
+      ctx.fillStyle = f.crit ? '#ffd34d' : '#fff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3;
+      ctx.strokeText(f.text, f.x, f.y); ctx.fillText(f.text, f.x, f.y);
     }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
 
-    for (const p of projectiles) { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); }
+    // Player
+    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) blit(Art.classSprite(player.classId), player.x, player.y, player.facing);
 
-    for (const g of player.orbitGroups) {
-      ctx.fillStyle = g.color;
-      for (const orb of g.orbs) { if (orb.x == null) continue; ctx.beginPath(); ctx.arc(orb.x, orb.y, g.r, 0, TAU); ctx.fill(); }
-    }
-
-    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) {
-      ctx.fillStyle = CLASS_BY_ID[player.classId].color;
-      ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, TAU); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 2; ctx.stroke();
-    }
     ctx.restore();
 
-    // Joystick (screen space)
+    // ── Torch lighting overlay (screen space) ─────────────────────────────────
+    const cx = W / 2 - sx, cy = H / 2 - sy;
+    const grd = ctx.createRadialGradient(cx, cy, 50, cx, cy, litR);
+    grd.addColorStop(0, 'rgba(10,8,6,0)'); grd.addColorStop(0.55, 'rgba(10,8,6,0.12)'); grd.addColorStop(0.85, 'rgba(9,7,5,0.62)'); grd.addColorStop(1, 'rgba(7,6,4,0.97)');
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
+
+    // Glowing eyes for enemies in the dark
+    if (darkEnemies.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      const eye = Art.eyeGlow();
+      for (const e of darkEnemies) {
+        const ex = e.x - camX, ey = e.y - camY;
+        const px = Math.cos(e.facing + Math.PI / 2), py = Math.sin(e.facing + Math.PI / 2);
+        const off = e.r * 0.35;
+        ctx.drawImage(eye, ex + px * off - 12, ey + py * off - 12);
+        ctx.drawImage(eye, ex - px * off - 12, ey - py * off - 12);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Low-HP danger vignette
+    const hpFrac = player.hp / player.maxHp;
+    if (hpFrac < 0.3) {
+      const pulse = 0.35 + Math.sin(elapsed * 7) * 0.15;
+      const a = ((0.3 - hpFrac) / 0.3) * pulse;
+      const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.62);
+      vg.addColorStop(0, 'rgba(170,20,20,0)'); vg.addColorStop(1, `rgba(150,10,10,${a})`);
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    }
+
+    // Level-up / pickup flash
+    if (flash > 0) { ctx.fillStyle = `rgba(255,250,230,${Math.min(0.5, flash) * 0.5})`; ctx.fillRect(0, 0, W, H); }
+
+    // Joystick
     if (joy.active) {
-      ctx.globalAlpha = 0.85;
-      ctx.strokeStyle = 'rgba(240,200,105,0.5)'; ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.85; ctx.strokeStyle = 'rgba(240,200,105,0.5)'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(joy.bx, joy.by, 50, 0, TAU); ctx.stroke();
-      ctx.fillStyle = 'rgba(240,200,105,0.6)';
-      ctx.beginPath(); ctx.arc(joy.nx, joy.ny, 24, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(240,200,105,0.6)'; ctx.beginPath(); ctx.arc(joy.nx, joy.ny, 24, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
     }
   }
@@ -457,7 +465,7 @@
     const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
     update(dt);
     if (state === 'playing') { render(); requestAnimationFrame(loop); }
-    else if (state === 'levelup') render();
+    else if (state === 'levelup' || state === 'paused') render();
   }
 
   // ── Movement-ability buttons ──────────────────────────────────────────────
@@ -468,63 +476,39 @@
     for (const s of player.skills) {
       const def = ABILITIES_BY_ID[s.id];
       if (def.kind !== 'movement') continue;
-      const btn = document.createElement('button');
-      btn.className = 'ability-btn';
+      const btn = document.createElement('button'); btn.className = 'ability-btn';
       btn.innerHTML = `<span class="ab-cd"></span><span class="ab-icon">${def.icon}</span>`;
-      const trigger = (ev) => {
-        ev.preventDefault(); ev.stopPropagation();
-        if (state !== 'playing' || s.timer > 0) return;
-        def.activate(makeCtx(), s.rank); s.timer = def.cooldown(s.rank);
-      };
-      btn.addEventListener('pointerdown', trigger);
-      wrap.appendChild(btn);
-      abilityButtons.push({ btn, skill: s, def });
+      btn.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); if (state !== 'playing' || s.timer > 0) return; def.activate(makeCtx(), s.rank); SFX.sfx('cast'); s.timer = def.cooldown(s.rank); });
+      wrap.appendChild(btn); abilityButtons.push({ btn, skill: s, def });
     }
   }
   function updateAbilityButtons() {
     for (const a of abilityButtons) {
       const cd = a.def.cooldown(a.skill.rank);
       const frac = a.skill.timer > 0 ? a.skill.timer / cd : 0;
-      a.btn.style.setProperty('--cd', frac);
-      a.btn.classList.toggle('ready', frac === 0);
+      a.btn.style.setProperty('--cd', frac); a.btn.classList.toggle('ready', frac === 0);
     }
   }
 
-  // ── Joystick + keyboard input ─────────────────────────────────────────────
+  // ── Joystick + keyboard ───────────────────────────────────────────────────
   const joy = { active: false, id: null, bx: 0, by: 0, nx: 0, ny: 0 };
   function setJoy(t) {
-    const dx = t.clientX - joy.bx, dy = t.clientY - joy.by, max = 50, d = Math.hypot(dx, dy) || 1;
-    const cl = Math.min(d, max);
-    joy.nx = joy.bx + (dx / d) * cl; joy.ny = joy.by + (dy / d) * cl;
-    input.dx = dx / max; input.dy = dy / max;
+    const dx = t.clientX - joy.bx, dy = t.clientY - joy.by, max = 50, d = Math.hypot(dx, dy) || 1, cl = Math.min(d, max);
+    joy.nx = joy.bx + (dx / d) * cl; joy.ny = joy.by + (dy / d) * cl; input.dx = dx / max; input.dy = dy / max;
   }
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    for (const t of e.changedTouches) {
-      if (joy.id === null) { joy.id = t.identifier; joy.active = true; joy.bx = t.clientX; joy.by = t.clientY; setJoy(t); }
-    }
-  }, { passive: false });
-  canvas.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    for (const t of e.changedTouches) if (t.identifier === joy.id) setJoy(t);
-  }, { passive: false });
-  function endTouch(e) {
-    for (const t of e.changedTouches) if (t.identifier === joy.id) { joy.id = null; joy.active = false; input.dx = input.dy = 0; }
-  }
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); for (const t of e.changedTouches) if (joy.id === null) { joy.id = t.identifier; joy.active = true; joy.bx = t.clientX; joy.by = t.clientY; setJoy(t); } }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); for (const t of e.changedTouches) if (t.identifier === joy.id) setJoy(t); }, { passive: false });
+  function endTouch(e) { for (const t of e.changedTouches) if (t.identifier === joy.id) { joy.id = null; joy.active = false; input.dx = input.dy = 0; } }
   canvas.addEventListener('touchend', (e) => { e.preventDefault(); endTouch(e); }, { passive: false });
   canvas.addEventListener('touchcancel', (e) => { e.preventDefault(); endTouch(e); }, { passive: false });
-
-  // Mouse drag (desktop joystick)
   canvas.addEventListener('mousedown', (e) => { joy.active = true; joy.id = 'mouse'; joy.bx = e.clientX; joy.by = e.clientY; setJoy(e); });
   window.addEventListener('mousemove', (e) => { if (joy.id === 'mouse') setJoy(e); });
   window.addEventListener('mouseup', () => { if (joy.id === 'mouse') { joy.id = null; joy.active = false; input.dx = input.dy = 0; } });
 
   window.addEventListener('keydown', (e) => {
     keys[e.key.toLowerCase()] = true;
-    if (e.key === ' ' && state === 'playing') {
-      const s = player.skills.find((x) => ABILITIES_BY_ID[x.id].kind === 'movement');
-      if (s && s.timer <= 0) { const def = ABILITIES_BY_ID[s.id]; def.activate(makeCtx(), s.rank); s.timer = def.cooldown(s.rank); }
-    }
+    if (e.key === ' ' && state === 'playing') { const s = player.skills.find((x) => ABILITIES_BY_ID[x.id].kind === 'movement'); if (s && s.timer <= 0) { const def = ABILITIES_BY_ID[s.id]; def.activate(makeCtx(), s.rank); SFX.sfx('cast'); s.timer = def.cooldown(s.rank); } }
+    if (e.key === 'Escape' && (state === 'playing' || state === 'paused')) togglePause();
   });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
   function pollKeys() {
@@ -537,7 +521,17 @@
   }
   pollKeys();
 
-  // ── Menu screens ──────────────────────────────────────────────────────────
+  // Resume the AudioContext on the first interaction (autoplay policy).
+  function firstGesture() { SFX.ensure(); window.removeEventListener('pointerdown', firstGesture); window.removeEventListener('keydown', firstGesture); }
+  window.addEventListener('pointerdown', firstGesture); window.addEventListener('keydown', firstGesture);
+
+  // ── Pause ─────────────────────────────────────────────────────────────────
+  function togglePause() {
+    if (state === 'playing') { state = 'paused'; showScreen('pause-screen'); }
+    else if (state === 'paused') { showScreen(null); resume(); }
+  }
+
+  // ── Menus ─────────────────────────────────────────────────────────────────
   function refreshTitle() { el('best-time').textContent = fmtTime(meta.bestTime); el('total-gold').textContent = meta.gold; }
 
   function buildClassSelect() {
@@ -548,7 +542,7 @@
       div.className = 'class-card' + (unlocked ? '' : ' locked') + (selectedClass === c.id ? ' selected' : '');
       div.style.setProperty('--accent', c.color);
       div.innerHTML = `<h3>${c.name}</h3><p>${unlocked ? c.blurb : lockText(c.unlock)}</p>`;
-      if (unlocked) div.onclick = () => { selectedClass = c.id; selectedWeapon = c.starterWeapon; buildClassSelect(); };
+      if (unlocked) div.onclick = () => { SFX.sfx('uiClick'); selectedClass = c.id; selectedWeapon = c.starterWeapon; buildClassSelect(); };
       grid.appendChild(div);
     }
     const cls = CLASS_BY_ID[selectedClass], wr = el('weapon-row');
@@ -558,16 +552,12 @@
       const b = document.createElement('button');
       b.className = 'weapon-chip' + (selectedWeapon === wid ? ' selected' : '') + (unlocked ? '' : ' locked');
       b.textContent = unlocked ? w.name : `🔒 ${w.name}`;
-      if (unlocked) b.onclick = () => { selectedWeapon = wid; buildClassSelect(); };
+      if (unlocked) b.onclick = () => { SFX.sfx('uiClick'); selectedWeapon = wid; buildClassSelect(); };
       wr.appendChild(b);
     }
     el('class-detail').textContent = WEAPON_BY_ID[selectedWeapon].desc;
   }
-  function lockText(u) {
-    if (u.type === 'gold') return `🔒 Buy for ${u.cost} gold`;
-    if (u.type === 'achievement') return `🔒 ${ACHIEVEMENT_BY_ID[u.achievement].name}`;
-    return 'Locked';
-  }
+  function lockText(u) { if (u.type === 'gold') return `🔒 Buy for ${u.cost} gold`; if (u.type === 'achievement') return `🔒 ${ACHIEVEMENT_BY_ID[u.achievement].name}`; return 'Locked'; }
 
   function buildShop() {
     el('shop-gold').textContent = `Gold: ${meta.gold}`;
@@ -578,11 +568,9 @@
     if (!items.length) { list.innerHTML = '<p class="muted">Everything purchasable is unlocked. Earn the rest via deeds.</p>'; return; }
     for (const it of items) {
       const row = document.createElement('div'); row.className = 'shop-row';
-      const can = meta.gold >= it.cost;
-      row.innerHTML = `<span>${it.name}</span>`;
-      const b = document.createElement('button');
-      b.className = 'btn small' + (can ? ' primary' : ''); b.textContent = `${it.cost} g`; b.disabled = !can;
-      b.onclick = () => { if (meta.gold >= it.cost) { meta.gold -= it.cost; it.buy(); saveMeta(); buildShop(); refreshTitle(); } };
+      const can = meta.gold >= it.cost; row.innerHTML = `<span>${it.name}</span>`;
+      const b = document.createElement('button'); b.className = 'btn small' + (can ? ' primary' : ''); b.textContent = `${it.cost} g`; b.disabled = !can;
+      b.onclick = () => { if (meta.gold >= it.cost) { meta.gold -= it.cost; it.buy(); SFX.sfx('purchase'); saveMeta(); buildShop(); refreshTitle(); } };
       row.appendChild(b); list.appendChild(row);
     }
   }
@@ -597,16 +585,34 @@
     }
   }
 
-  el('start-btn').onclick = () => { el('begin-btn').dataset.daily = ''; buildClassSelect(); showScreen('class-screen'); };
-  el('daily-btn').onclick = () => { el('begin-btn').dataset.daily = '1'; buildClassSelect(); showScreen('class-screen'); };
-  el('shop-btn').onclick = () => { buildShop(); showScreen('shop-screen'); };
-  el('ach-btn').onclick = () => { buildAchievements(); showScreen('ach-screen'); };
-  el('shop-back-btn').onclick = () => { refreshTitle(); showScreen('title-screen'); };
-  el('ach-back-btn').onclick = () => showScreen('title-screen');
-  el('class-back-btn').onclick = () => showScreen('title-screen');
-  el('begin-btn').onclick = () => { const daily = el('begin-btn').dataset.daily === '1'; startRun(daily ? dailySeed() : `run-${Date.now()}`); };
-  el('restart-btn').onclick = () => { refreshTitle(); showScreen('title-screen'); };
+  // Volume controls (shared by pause + settings)
+  function wireVolume(sliderId, muteId) {
+    const sl = el(sliderId), mb = el(muteId);
+    sl.value = String(Math.round(meta.volume * 100));
+    const syncMute = () => { mb.textContent = meta.muted ? '🔇 Muted' : '🔊 Sound On'; };
+    syncMute();
+    sl.oninput = () => { meta.volume = sl.value / 100; SFX.setVolume(meta.volume); saveMeta(); };
+    mb.onclick = () => { meta.muted = !meta.muted; SFX.setMuted(meta.muted); syncMute(); saveMeta(); SFX.sfx('uiClick'); };
+  }
 
+  const clk = (fn) => () => { SFX.sfx('uiClick'); fn(); };
+  el('start-btn').onclick = clk(() => { el('begin-btn').dataset.daily = ''; buildClassSelect(); showScreen('class-screen'); });
+  el('daily-btn').onclick = clk(() => { el('begin-btn').dataset.daily = '1'; buildClassSelect(); showScreen('class-screen'); });
+  el('shop-btn').onclick = clk(() => { buildShop(); showScreen('shop-screen'); });
+  el('ach-btn').onclick = clk(() => { buildAchievements(); showScreen('ach-screen'); });
+  el('settings-btn').onclick = clk(() => { wireVolume('vol-slider2', 'mute-btn2'); showScreen('settings-screen'); });
+  el('settings-back-btn').onclick = clk(() => showScreen('title-screen'));
+  el('shop-back-btn').onclick = clk(() => { refreshTitle(); showScreen('title-screen'); });
+  el('ach-back-btn').onclick = clk(() => showScreen('title-screen'));
+  el('class-back-btn').onclick = clk(() => showScreen('title-screen'));
+  el('begin-btn').onclick = clk(() => { const daily = el('begin-btn').dataset.daily === '1'; startRun(daily ? dailySeed() : `run-${Date.now()}`); });
+  el('restart-btn').onclick = clk(() => { refreshTitle(); showScreen('title-screen'); });
+  el('pause-btn').onclick = () => { SFX.sfx('uiClick'); togglePause(); };
+  el('resume-btn').onclick = () => { SFX.sfx('uiClick'); showScreen(null); resume(); };
+  el('quit-btn').onclick = clk(() => { state = 'title'; SFX.stopMusic(); refreshTitle(); showScreen('title-screen'); });
+
+  SFX.config(meta.volume, meta.muted);
+  wireVolume('vol-slider', 'mute-btn');
   refreshTitle();
   showScreen('title-screen');
 })();
