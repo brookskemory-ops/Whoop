@@ -1,0 +1,211 @@
+/* ── Ironvow — medieval dark theme ─────────────────────────────────────────── */
+:root {
+  --bg: #15130f;
+  --stone: #211d17;
+  --stone-2: #2c261d;
+  --ink: #ece3cf;
+  --muted: #a99f86;
+  --gold: #d9b25a;
+  --gold-bright: #f0c869;
+  --blood: #b5413a;
+  --hp: #c0473f;
+  --xp: #5aa9d9;
+  --border: #463b2a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  display: block;
+  touch-action: none;
+}
+
+/* ── HUD ───────────────────────────────────────────────────────────────────── */
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+  pointer-events: none;
+  z-index: 10;
+}
+#top-bar {
+  display: flex;
+  justify-content: space-between;
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 4px #000;
+}
+#top-bar #timer { color: var(--gold-bright); }
+#bars { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.bar-bg {
+  height: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bar-bg.xp-bg { height: 7px; }
+.bar { height: 100%; width: 0; transition: width 0.12s linear; }
+.bar.hp { background: linear-gradient(180deg, #e0635a, var(--hp)); }
+.bar.xp { background: linear-gradient(180deg, #74c2ef, var(--xp)); }
+
+/* ── Screens ───────────────────────────────────────────────────────────────── */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: calc(env(safe-area-inset-top) + 24px) 22px calc(env(safe-area-inset-bottom) + 24px);
+  text-align: center;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(60, 50, 32, 0.4), transparent 60%),
+    linear-gradient(180deg, #1b1812, #100e0a);
+  overflow-y: auto;
+}
+.screen.overlay { background: rgba(10, 8, 6, 0.82); backdrop-filter: blur(3px); }
+.hidden { display: none !important; }
+
+h1 {
+  font-size: clamp(42px, 13vw, 78px);
+  letter-spacing: 6px;
+  color: var(--gold);
+  text-shadow: 0 3px 0 #5a4622, 0 6px 18px rgba(0, 0, 0, 0.7);
+  font-weight: 900;
+}
+h2 {
+  font-size: clamp(24px, 6vw, 34px);
+  color: var(--gold-bright);
+  letter-spacing: 2px;
+  text-shadow: 0 2px 6px #000;
+}
+h3 { font-size: 17px; color: var(--ink); letter-spacing: 0.5px; }
+.tag { color: var(--muted); font-size: 15px; font-style: italic; }
+.detail { color: var(--muted); font-size: 13px; min-height: 18px; max-width: 460px; }
+.hint { color: var(--muted); font-size: 12px; opacity: 0.8; }
+.big { font-size: 56px; font-weight: 900; color: var(--gold-bright); text-shadow: 0 3px 8px #000; }
+.muted { color: var(--muted); font-size: 13px; }
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+.btn {
+  font: inherit;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 22px;
+  min-width: 220px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #0c0a07, inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 0.05s, filter 0.1s;
+}
+.btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #0c0a07; }
+.btn.primary {
+  color: #1a1308;
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border-color: #8a6a2c;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.btn.small { min-width: 0; padding: 8px 14px; font-size: 13px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.menu { display: flex; flex-direction: column; gap: 11px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+.stats { display: flex; gap: 22px; color: var(--muted); font-size: 15px; }
+.stats b { color: var(--gold-bright); }
+
+/* ── Class select ──────────────────────────────────────────────────────────── */
+#class-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+}
+.class-card {
+  --accent: var(--gold);
+  text-align: left;
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.class-card h3 { color: var(--accent); margin-bottom: 4px; }
+.class-card p { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.class-card.selected { box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(0, 0, 0, 0.5); }
+.class-card.locked { opacity: 0.55; cursor: not-allowed; }
+
+#weapon-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+#weapon-row .label { color: var(--muted); font-size: 13px; }
+.weapon-chip {
+  font: inherit; font-size: 13px;
+  background: var(--stone); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 7px 14px; cursor: pointer;
+}
+.weapon-chip.selected { background: var(--gold); color: #1a1308; border-color: #8a6a2c; font-weight: bold; }
+.weapon-chip.locked { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Lists (shop + achievements) ───────────────────────────────────────────── */
+.list { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 8px; }
+.shop-row, .ach-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; text-align: left;
+}
+.ach-row .unlocks { color: var(--gold); font-size: 12px; text-align: right; max-width: 40%; }
+.ach-row.done { border-color: var(--gold); }
+.ach-row.done b { color: var(--gold-bright); }
+
+/* ── Ability / upgrade cards ───────────────────────────────────────────────── */
+#upgrade-cards {
+  display: flex; flex-direction: column; gap: 9px;
+  width: 100%; max-width: 420px;
+}
+.card {
+  text-align: left; font: inherit; cursor: pointer;
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  border: 1px solid var(--border); border-left: 4px solid var(--gold);
+  border-radius: 8px; padding: 12px 15px; color: var(--ink);
+}
+.card:active { transform: translateY(1px); }
+.card h3 { color: var(--gold-bright); margin-bottom: 3px; }
+.card p { font-size: 13px; color: var(--ink); }
+.card .rank { font-size: 11px; color: var(--muted); display: block; margin-top: 4px; }
+
+.unlocks-note { color: var(--gold-bright); font-size: 14px; line-height: 1.5; }
+
+#seed-label {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom) + 6px);
+  right: 8px;
+  font-size: 10px;
+  color: rgba(169, 159, 134, 0.5);
+  z-index: 10;
+  pointer-events: none;
+}

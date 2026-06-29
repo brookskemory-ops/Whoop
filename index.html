@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#15130f" />
+  <title>Ironvow</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="top-bar">
+      <span id="level-text">Lv 1</span>
+      <span id="timer">0:00</span>
+    </div>
+    <div id="bars">
+      <div class="bar-bg"><div id="hp-bar" class="bar hp"></div></div>
+      <div class="bar-bg xp-bg"><div id="xp-bar" class="bar xp"></div></div>
+    </div>
+  </div>
+
+  <!-- Title -->
+  <div id="title-screen" class="screen">
+    <h1>IRONVOW</h1>
+    <p class="tag">Hold the line. Forge your legend.</p>
+    <div class="menu">
+      <button id="start-btn" class="btn primary">New Run</button>
+      <button id="daily-btn" class="btn">Daily Challenge</button>
+      <button id="shop-btn" class="btn">Armory (Shop)</button>
+      <button id="ach-btn" class="btn">Deeds (Achievements)</button>
+    </div>
+    <div class="stats">
+      <span>Best: <b id="best-time">0:00</b></span>
+      <span>Gold: <b id="total-gold">0</b></span>
+    </div>
+    <p class="hint">Drag to move · your weapon strikes on its own</p>
+  </div>
+
+  <!-- Class select -->
+  <div id="class-screen" class="screen hidden">
+    <h2>Choose Your Champion</h2>
+    <div id="class-grid"></div>
+    <div id="weapon-row"></div>
+    <p id="class-detail" class="detail"></p>
+    <div class="row">
+      <button id="class-back-btn" class="btn">Back</button>
+      <button id="begin-btn" class="btn primary">Begin</button>
+    </div>
+  </div>
+
+  <!-- Shop -->
+  <div id="shop-screen" class="screen hidden">
+    <h2>The Armory</h2>
+    <p id="shop-gold" class="tag">Gold: 0</p>
+    <div id="shop-list" class="list"></div>
+    <button id="shop-back-btn" class="btn">Back</button>
+  </div>
+
+  <!-- Achievements -->
+  <div id="ach-screen" class="screen hidden">
+    <h2>Deeds</h2>
+    <div id="ach-list" class="list"></div>
+    <button id="ach-back-btn" class="btn">Back</button>
+  </div>
+
+  <!-- Level up -->
+  <div id="levelup-screen" class="screen overlay hidden">
+    <h2 id="levelup-title">Level Up!</h2>
+    <p class="tag">Choose an ability</p>
+    <div id="upgrade-cards"></div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameover-screen" class="screen overlay hidden">
+    <h2>You Have Fallen</h2>
+    <p class="big" id="over-time">0:00</p>
+    <p class="tag" id="over-gold">+0 gold</p>
+    <p class="unlocks-note" id="over-unlocks"></p>
+    <button id="restart-btn" class="btn primary">Continue</button>
+  </div>
+
+  <span id="seed-label"></span>
+
+  <script src="js/rng.js"></script>
+  <script src="js/classes.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/abilities.js"></script>
+  <script src="js/achievements.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
