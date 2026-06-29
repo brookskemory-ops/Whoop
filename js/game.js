@@ -32,6 +32,7 @@
     m.totalKills = m.totalKills || 0; m.classKills = m.classKills || {};
     m.volume = m.volume == null ? 0.7 : m.volume;
     m.muted = !!m.muted;
+    m.upgrades = Object.assign({ vigor: 0, might: 0, haste: 0, fortune: 0, revive: 0 }, m.upgrades || {});
     for (const w of WEAPONS) if (w.unlock.type === 'default') m.unlockedWeapons[w.id] = true;
     for (const c of CLASSES) if (c.unlock.type === 'default') m.unlockedClasses[c.id] = true;
     return m;
@@ -76,11 +77,28 @@
     level: 1, xp: 0, xpNext: 5, invuln: 0, facing: 0,
   };
 
+  // Permanent meta-upgrade tracks (bought with gold in the Armory).
+  const UPGRADE_TRACKS = [
+    { id: 'vigor', name: 'Vigor', desc: (l) => `+${l * 20} max HP`, max: 8, cost: (l) => Math.round(40 * Math.pow(1.6, l)) },
+    { id: 'might', name: 'Might', desc: (l) => `+${l * 8}% damage`, max: 8, cost: (l) => Math.round(50 * Math.pow(1.6, l)) },
+    { id: 'haste', name: 'Haste', desc: (l) => `+${l * 5}% move speed`, max: 6, cost: (l) => Math.round(50 * Math.pow(1.6, l)) },
+    { id: 'fortune', name: 'Fortune', desc: (l) => `+${l * 10}% gold, +${l * 8}% XP`, max: 6, cost: (l) => Math.round(60 * Math.pow(1.6, l)) },
+    { id: 'revive', name: 'Revive', desc: (l) => `${l} second chance${l === 1 ? '' : 's'} per run`, max: 2, cost: (l) => [300, 800][l] || 9999 },
+  ];
+
   function createPlayer(classId, weaponId) {
     const cls = CLASS_BY_ID[classId];
     const p = Object.assign({}, DEFAULTS, cls.baseStats);
     p.x = 0; p.y = 0; p.classId = classId; p.weaponId = weaponId;
     p.skills = []; p.orbitGroups = []; p.dash = null; p.attackTimer = 0;
+    // Apply permanent upgrades.
+    const u = meta.upgrades;
+    p.maxHp += u.vigor * 20;
+    p.damage *= 1 + u.might * 0.08;
+    p.speed *= 1 + u.haste * 0.05;
+    p.fortuneGold = 1 + u.fortune * 0.10;
+    p.fortuneXp = 1 + u.fortune * 0.08;
+    p.revives = u.revive;
     const w = WEAPON_BY_ID[weaponId];
     p.attackCooldown = w.cooldown || 0.6; p.hp = p.maxHp;
     if (w.init) w.init(p);
@@ -158,6 +176,7 @@
     bossEnemy = null; nextMini = 0; finalSpawned = false; bannerText = ''; bannerTimer = 0;
     pendingUnlocks = [];
     state = 'playing'; showScreen(null);
+    if (DEV_FAST) window.__player = player; // test-only live-stats seam
     el('seed-label').textContent = `seed: ${seed}`;
     refreshAbilityButtons();
     SFX.ensure(); SFX.startMusic();
@@ -265,26 +284,38 @@
     if (fresh.length) saveMeta();
   }
 
+  function revivePlayer() {
+    player.revives--;
+    player.hp = Math.round(player.maxHp * 0.5);
+    player.invuln = 2.5; flash = 0.6; addShake(8); SFX.sfx('levelup');
+    showBanner('Second Wind!');
+    for (const e of enemies) { // clear out the swarm that just killed you
+      const dx = e.x - player.x, dy = e.y - player.y, d = Math.hypot(dx, dy) || 1;
+      if (d < 210) { e.x += (dx / d) * 230; e.y += (dy / d) * 230; if (!e.boss) damageEnemy(e, e.maxHp, false); }
+    }
+  }
+
   function die() {
+    if (player.revives > 0) { revivePlayer(); return; }
     state = 'dead'; SFX.stopMusic();
-    meta.gold += runGold; meta.totalKills += runKills;
+    meta.gold += Math.floor(runGold); meta.totalKills += runKills;
     meta.classKills[player.classId] = (meta.classKills[player.classId] || 0) + runKills;
     if (elapsed > meta.bestTime) meta.bestTime = elapsed;
     checkRunAchievements(); saveMeta();
     el('over-time').textContent = fmtTime(elapsed);
-    el('over-gold').textContent = `+${runGold} gold · ${runKills} slain`;
+    el('over-gold').textContent = `+${Math.floor(runGold)} gold · ${runKills} slain`;
     el('over-unlocks').innerHTML = pendingUnlocks.length ? '<b>Unlocked!</b><br>' + pendingUnlocks.map((a) => `${a.name} — ${a.unlocks}`).join('<br>') : '';
     showScreen('gameover-screen');
   }
 
   function victory() {
     state = 'won'; SFX.stopMusic(); SFX.sfx('levelup');
-    meta.gold += runGold; meta.totalKills += runKills;
+    meta.gold += Math.floor(runGold); meta.totalKills += runKills;
     meta.classKills[player.classId] = (meta.classKills[player.classId] || 0) + runKills;
     if (elapsed > meta.bestTime) meta.bestTime = elapsed;
     checkRunAchievements(); saveMeta();
     el('win-time').textContent = fmtTime(elapsed);
-    el('win-gold').textContent = `+${runGold} gold · ${runKills} slain`;
+    el('win-gold').textContent = `+${Math.floor(runGold)} gold · ${runKills} slain`;
     el('win-unlocks').innerHTML = pendingUnlocks.length ? '<b>Unlocked!</b><br>' + pendingUnlocks.map((a) => `${a.name} — ${a.unlocks}`).join('<br>') : '';
     showScreen('victory-screen');
   }
@@ -401,7 +432,7 @@
     for (const g of gems) {
       const d2 = (g.x - player.x) ** 2 + (g.y - player.y) ** 2;
       if (d2 < player.pickupRange ** 2) { const a = Math.atan2(player.y - g.y, player.x - g.x); g.x += Math.cos(a) * 340 * dt; g.y += Math.sin(a) * 340 * dt; }
-      if (d2 < (player.r + 7) ** 2) { g.collected = true; runGold += g.gold; SFX.sfx('pickup'); effects.push({ type: 'ring', x: player.x, y: player.y, r: 4, maxR: 22, life: 0.25, maxLife: 0.25, color: '#4ad6e8' }); gainXp(g.xp); }
+      if (d2 < (player.r + 7) ** 2) { g.collected = true; runGold += g.gold * player.fortuneGold; SFX.sfx('pickup'); effects.push({ type: 'ring', x: player.x, y: player.y, r: 4, maxR: 22, life: 0.25, maxLife: 0.25, color: '#4ad6e8' }); gainXp(g.xp * player.fortuneXp); }
     }
 
     for (const pt of particles) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt; }
@@ -420,6 +451,7 @@
     el('timer').textContent = fmtTime(elapsed);
     el('hp-bar').style.width = `${Math.max(0, (player.hp / player.maxHp) * 100)}%`;
     el('xp-bar').style.width = `${(player.xp / player.xpNext) * 100}%`;
+    el('revive-pip').textContent = player.revives > 0 ? `♥ ${player.revives}` : '';
     if (bossEnemy && bossEnemy.hp > 0) {
       el('boss-bar-wrap').classList.remove('hidden');
       el('boss-name').textContent = bossEnemy.final ? 'The Warden' : 'Champion';
@@ -649,19 +681,38 @@
   }
   function lockText(u) { if (u.type === 'gold') return `🔒 Buy for ${u.cost} gold`; if (u.type === 'achievement') return `🔒 ${ACHIEVEMENT_BY_ID[u.achievement].name}`; return 'Locked'; }
 
+  function shopRow(list, label, sub, costText, can, onBuy) {
+    const row = document.createElement('div'); row.className = 'shop-row';
+    row.innerHTML = `<span><b>${label}</b>${sub ? `<br><span class="muted">${sub}</span>` : ''}</span>`;
+    const b = document.createElement('button'); b.className = 'btn small' + (can ? ' primary' : '');
+    b.textContent = costText; b.disabled = !can; b.onclick = onBuy;
+    row.appendChild(b); list.appendChild(row);
+  }
+  function shopHead(list, text) { const h = document.createElement('div'); h.className = 'shop-head'; h.textContent = text; list.appendChild(h); }
+
   function buildShop() {
     el('shop-gold').textContent = `Gold: ${meta.gold}`;
     const list = el('shop-list'); list.innerHTML = '';
+
+    // Permanent upgrades
+    shopHead(list, 'Permanent Upgrades');
+    for (const t of UPGRADE_TRACKS) {
+      const lvl = meta.upgrades[t.id], maxed = lvl >= t.max, cost = t.cost(lvl), can = !maxed && meta.gold >= cost;
+      shopRow(list, t.name, `Lv ${lvl}/${t.max} · ${t.desc(lvl)}`, maxed ? 'MAX' : `${cost} g`, can, () => {
+        if (!maxed && meta.gold >= cost) { meta.gold -= cost; meta.upgrades[t.id]++; SFX.sfx('purchase'); saveMeta(); buildShop(); refreshTitle(); }
+      });
+    }
+
+    // Unlocks (classes + weapons)
     const items = [];
     for (const c of CLASSES) if (c.unlock.type === 'gold' && !classUnlocked(c)) items.push({ name: `${c.name} (class)`, cost: c.unlock.cost, buy: () => { meta.unlockedClasses[c.id] = true; } });
     for (const w of WEAPONS) if (w.unlock.type === 'gold' && !weaponUnlocked(w)) items.push({ name: `${w.name} (${CLASS_BY_ID[w.classId].name})`, cost: w.unlock.cost, buy: () => { meta.unlockedWeapons[w.id] = true; } });
-    if (!items.length) { list.innerHTML = '<p class="muted">Everything purchasable is unlocked. Earn the rest via deeds.</p>'; return; }
-    for (const it of items) {
-      const row = document.createElement('div'); row.className = 'shop-row';
-      const can = meta.gold >= it.cost; row.innerHTML = `<span>${it.name}</span>`;
-      const b = document.createElement('button'); b.className = 'btn small' + (can ? ' primary' : ''); b.textContent = `${it.cost} g`; b.disabled = !can;
-      b.onclick = () => { if (meta.gold >= it.cost) { meta.gold -= it.cost; it.buy(); SFX.sfx('purchase'); saveMeta(); buildShop(); refreshTitle(); } };
-      row.appendChild(b); list.appendChild(row);
+    if (items.length) {
+      shopHead(list, 'Unlocks');
+      for (const it of items) {
+        const can = meta.gold >= it.cost;
+        shopRow(list, it.name, '', `${it.cost} g`, can, () => { if (meta.gold >= it.cost) { meta.gold -= it.cost; it.buy(); SFX.sfx('purchase'); saveMeta(); buildShop(); refreshTitle(); } });
+      }
     }
   }
 
