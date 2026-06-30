@@ -1,0 +1,5 @@
+# Godot 4 import cache + per-machine editor data
+.godot/
+# Exported builds
+/build/
+*.tmp
