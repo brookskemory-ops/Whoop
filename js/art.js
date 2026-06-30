@@ -233,6 +233,11 @@ const Art = (() => {
     return { canvas: out, cx: disp / 2, cy: disp / 2 };
   }
   function setSprite(key, spr) { (PLAYER_KEYS.indexOf(key) >= 0 ? classCache : enemyCache)[key] = spr; }
+  // Asset PNGs are detailed — show them noticeably larger than the coded fallbacks.
+  function assetDisp(key) {
+    const base = DISP[key] || 36;
+    return Math.round(base * ((key === 'miniboss' || key === 'finalboss') ? 1.5 : 2.0));
+  }
   async function preloadAssets() {
     let list = [];
     try { const r = await fetch('assets/sprites/manifest.json', { cache: 'no-cache' }); if (r.ok) list = await r.json(); } catch {}
@@ -240,7 +245,7 @@ const Art = (() => {
       const key = String(file).replace(/\.png$/i, '');
       if (!ASSET_KEYS.has(key)) continue;
       const img = new Image();
-      img.onload = () => setSprite(key, bakeImage(img, Math.round((DISP[key] || 36) * 1.35)));
+      img.onload = () => setSprite(key, bakeImage(img, assetDisp(key)));
       img.src = 'assets/sprites/' + file;
     }
   }
