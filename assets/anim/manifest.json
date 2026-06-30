@@ -6,5 +6,9 @@
   "archer": {
     "dirs": ["south", "north", "east", "north-east", "south-east"],
     "states": { "idle": 5, "walk": 9, "attack": 7, "special": 7, "dash": 5, "hurt": 5, "death": 7 }
+  },
+  "mage": {
+    "dirs": ["south", "north", "east", "north-east", "south-east"],
+    "states": { "idle": 5, "walk": 9, "attack": 7, "special": 7, "dash": 5, "hurt": 5, "death": 7 }
   }
 }
