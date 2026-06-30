@@ -133,6 +133,39 @@ func hurt_area(pos: Vector2, r: float, amount: float) -> void:
 	if _player and _player.global_position.distance_to(pos) < r + _player.radius():
 		_player.take_damage(amount)
 
+# Weapon/ability combat ctx (ported from makeCtx in js/game.js).
+func nearest_enemy_to(pos: Vector2) -> Node2D:
+	var best: Node2D = null
+	var bd := INF
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var d: float = pos.distance_squared_to(e.global_position)
+		if d < bd:
+			bd = d; best = e
+	return best
+
+func dir_to_nearest(pos: Vector2) -> float:
+	var t := nearest_enemy_to(pos)
+	return (t.global_position - pos).angle() if t != null else randf() * TAU
+
+func area_damage(center: Vector2, radius: float, mult: float, opts: Dictionary) -> void:
+	var dmg: float = _player.damage * mult
+	var crit: bool = opts.get("crit", false)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var off: Vector2 = e.global_position - center
+		if off.length() <= radius + e.radius:
+			e.take_damage(dmg, crit)
+			if opts.has("slow"):
+				e.apply_slow(opts["slow"])
+			if opts.has("knockback"):
+				var d := off.length()
+				if d > 0.0:
+					e.global_position += off / d * opts["knockback"] * 0.06
+
+func spawn_player_projectile(pos: Vector2, vel: Vector2, dmg: float, crit: bool, pierce: int, r: float, col: Color, on_hit := Callable()) -> void:
+	var pr := preload("res://scripts/Projectile.gd").new()
+	pr.setup(pos, vel, dmg, crit, pierce, r, col, on_hit)
+	_world.add_child(pr)
+
 func on_final_boss_killed() -> void:
 	pass  # victory state — Phase 2
 
@@ -195,6 +228,13 @@ func _run_selftest() -> void:
 	# Force one of every archetype so all AI branches run at least once.
 	for key in ["shooter", "exploder", "splitter", "charger", "ogre", "miniboss", "finalboss"]:
 		add_enemy(key, _player.global_position + Vector2(randf_range(-180, 180), randf_range(-180, 180)), 1.0)
+	# Fire every weapon once so all four patterns (melee/projectile/nova/orbital) run.
+	for wid in GameData.WEAPON_META:
+		if GameData.WEAPON_META[wid]["type"] == "orbital":
+			Weapons.init_weapon(wid, _player)
+		else:
+			_player.weapon_id = wid
+			Weapons.fire(wid, _player, self)
 	var t := 0.0
 	while t < 8.0:
 		await get_tree().process_frame

@@ -23,6 +23,22 @@ const ANIM_MIRROR := {"west": "east", "north-west": "north-east", "south-west": 
 # Classes that currently have external 8-dir animation art on disk.
 const ANIMATED_CLASSES := ["knight", "archer", "mage", "rogue", "cleric"]
 
+# Weapon metadata, ported from js/weapons.js. Fire logic lives in Weapons.gd.
+const WEAPON_META := {
+	"arming_sword":  {"name": "Arming Sword",     "type": "melee",      "cooldown": 0.7},
+	"warhammer":     {"name": "Warhammer",        "type": "melee",      "cooldown": 1.3},
+	"shortbow":      {"name": "Shortbow",         "type": "projectile", "cooldown": 0.6},
+	"crossbow":      {"name": "Crossbow",         "type": "projectile", "cooldown": 0.35},
+	"fireball":      {"name": "Fireball",         "type": "projectile", "cooldown": 0.85},
+	"frost_nova":    {"name": "Frost Nova",       "type": "nova",       "cooldown": 1.5},
+	"daggers":       {"name": "Throwing Daggers", "type": "projectile", "cooldown": 0.28},
+	"fan_of_knives": {"name": "Fan of Knives",    "type": "projectile", "cooldown": 0.7},
+	"holy_bolt":     {"name": "Holy Bolt",        "type": "projectile", "cooldown": 0.7},
+	"censer":        {"name": "Holy Censer",      "type": "orbital",    "cooldown": 0.7},
+	"whirlwind_axe": {"name": "Whirlwind Axe",    "type": "orbital",    "cooldown": 0.7},
+	"throwing_axe":  {"name": "Throwing Axe",     "type": "projectile", "cooldown": 0.9},
+}
+
 # Enemy archetypes, ported from js/enemies.js (ENEMY_BASE). `kind` selects the AI.
 const ENEMY_BASE := {
 	"skeleton":  {"kind": "chaser",    "r": 12.0, "hp": 18.0,   "speed": 70.0,  "dmg": 8.0,  "color": "d6d3c4", "gold": 1.0,   "xp": 1.0},
