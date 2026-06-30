@@ -27,6 +27,12 @@ var _joy_id := -1
 var _joy_base := Vector2.ZERO
 var _joy_vec := Vector2.ZERO
 
+# Level-up flow
+var _pending_levels := 0
+var _leveling := false
+var _auto_pick := false
+var _level_ui: CanvasLayer
+
 # Headless self-test movement override
 var _testing := false
 var _test_dir := Vector2.ZERO
@@ -58,6 +64,7 @@ func _start_run() -> void:
 	_player = Player.new()
 	_player.setup(SELECTED_CLASS)
 	_player.died.connect(_on_player_died)
+	_player.leveled_up.connect(_on_level_up)
 	_world.add_child(_player)
 
 	_camera = Camera2D.new()
@@ -169,6 +176,60 @@ func spawn_player_projectile(pos: Vector2, vel: Vector2, dmg: float, crit: bool,
 func on_final_boss_killed() -> void:
 	pass  # victory state — Phase 2
 
+# ── Level-up: pick an ability (ported from openLevelUp in js/game.js) ──────────
+func _on_level_up() -> void:
+	_pending_levels += 1
+	if not _leveling:
+		_open_level_up()
+
+func _open_level_up() -> void:
+	while _pending_levels > 0:
+		var opts := Abilities.roll(_player.cls_id, _player.owned_ranks(), 5)
+		if opts.is_empty():
+			_player.hp = min(_player.max_hp, _player.hp + 30.0)
+			_pending_levels -= 1
+			continue
+		if _auto_pick:
+			_player.apply_pick(opts[0])
+			_pending_levels -= 1
+			continue
+		_leveling = true
+		get_tree().paused = true
+		_build_level_cards(opts)
+		return
+	_leveling = false
+	get_tree().paused = false
+
+func _build_level_cards(opts: Array) -> void:
+	_level_ui = CanvasLayer.new()
+	_level_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_level_ui)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_level_ui.add_child(dim)
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_CENTER)
+	vbox.position = Vector2(40, 120); vbox.custom_minimum_size = Vector2(400, 0)
+	vbox.add_theme_constant_override("separation", 10)
+	_level_ui.add_child(vbox)
+	var title := Label.new()
+	title.text = "Level %d — choose:" % _player.level
+	vbox.add_child(title)
+	for opt in opts:
+		var def: Dictionary = opt["ability"]
+		var b := Button.new()
+		var tag := "NEW" if opt["is_new"] else "Rank %d→%d" % [opt["next_rank"] - 1, opt["next_rank"]]
+		b.text = "%s  %s [%s]\n%s" % [def["icon"], def["name"], tag, Abilities.describe(def, opt["next_rank"])]
+		b.custom_minimum_size = Vector2(400, 56)
+		b.pressed.connect(_pick_ability.bind(opt))
+		vbox.add_child(b)
+
+func _pick_ability(opt: Dictionary) -> void:
+	_player.apply_pick(opt)
+	if _level_ui: _level_ui.queue_free(); _level_ui = null
+	_pending_levels -= 1
+	_open_level_up()
+
 # ── Input: touch joystick (falls back to mouse) + WASD/arrows ─────────────────
 func _read_input() -> Vector2:
 	if _joy_active:
@@ -195,6 +256,8 @@ func _input(event: InputEvent) -> void:
 			_joy_active = false; _joy_vec = Vector2.ZERO
 	elif event is InputEventMouseMotion and _joy_active:
 		_joy_vec = (event.position - _joy_base) / 50.0
+	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_SPACE:
+		if _player: _player.use_movement_ability()
 
 # ── HUD ───────────────────────────────────────────────────────────────────────
 func _build_hud() -> void:
@@ -208,6 +271,10 @@ func _build_hud() -> void:
 	_hp_fill = ColorRect.new()
 	_hp_fill.color = Color("d23b3b"); _hp_fill.position = Vector2(12, 34); _hp_fill.size = Vector2(_hp_w, 12)
 	layer.add_child(_hp_fill)
+	var ab_btn := Button.new()
+	ab_btn.text = "✦"; ab_btn.position = Vector2(390, 720); ab_btn.custom_minimum_size = Vector2(72, 72)
+	ab_btn.pressed.connect(func(): if _player: _player.use_movement_ability())
+	layer.add_child(ab_btn)
 
 func _update_hud() -> void:
 	_lbl_level.text = "Lv %d" % _player.level
@@ -225,9 +292,13 @@ func _on_player_died() -> void:
 func _run_selftest() -> void:
 	# Drive the player in a slow circle so combat/animation actually exercise.
 	_testing = true
+	_auto_pick = true   # auto-pick level-up cards (no UI in headless)
 	# Force one of every archetype so all AI branches run at least once.
 	for key in ["shooter", "exploder", "splitter", "charger", "ogre", "miniboss", "finalboss"]:
 		add_enemy(key, _player.global_position + Vector2(randf_range(-180, 180), randf_range(-180, 180)), 1.0)
+	# Grant one ability per mechanic so every activate() branch runs.
+	for aid in ["kn_bash", "kn_slam", "kn_spears", "ar_scatter", "mg_chain", "kn_whirl", "kn_charge", "mg_blink"]:
+		_player.apply_pick({"ability": Abilities.by_id(aid), "next_rank": 1, "is_new": true})
 	# Fire every weapon once so all four patterns (melee/projectile/nova/orbital) run.
 	for wid in GameData.WEAPON_META:
 		if GameData.WEAPON_META[wid]["type"] == "orbital":
@@ -236,10 +307,14 @@ func _run_selftest() -> void:
 			_player.weapon_id = wid
 			Weapons.fire(wid, _player, self)
 	var t := 0.0
+	var next_ability := 1.0
 	while t < 8.0:
 		await get_tree().process_frame
 		t += get_process_delta_time()
 		_test_dir = Vector2(cos(t), sin(t * 0.7))
+		if t > next_ability:
+			_player.use_movement_ability()
+			next_ability += 1.5
 	var enemies := get_tree().get_nodes_in_group("enemies").size()
 	var projectiles := 0
 	for c in _world.get_children():
@@ -250,7 +325,7 @@ func _run_selftest() -> void:
 		if c.get_script() == preload("res://scripts/Gem.gd"):
 			gems += 1
 	var sprite_ok := _player.get_child(0) is Sprite2D and _player.get_child(0).texture != null
-	print("[SELFTEST] elapsed=%.1f hp=%.0f/%.0f level=%d enemies=%d kills=%d gold=%.0f proj=%d gems=%d anim_texture_ok=%s moved=%s" % [
+	print("[SELFTEST] elapsed=%.1f hp=%.0f/%.0f level=%d enemies=%d kills=%d gold=%.0f proj=%d gems=%d skills=%d anim_texture_ok=%s moved=%s" % [
 		elapsed, _player.hp, _player.max_hp, _player.level, enemies, run_kills, run_gold,
-		projectiles, gems, str(sprite_ok), str(_player.global_position.length() > 1.0)])
+		projectiles, gems, _player.skills.size(), str(sprite_ok), str(_player.global_position.length() > 1.0)])
 	get_tree().quit(0)

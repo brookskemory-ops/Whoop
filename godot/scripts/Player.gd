@@ -5,6 +5,7 @@ extends CharacterBody2D
 ## and orbital groups.
 
 signal died
+signal leveled_up
 
 const SPRITE_SCALE := 0.6
 
@@ -27,6 +28,8 @@ var proj_count := 1
 var weapon_id := "arming_sword"
 var weapon_type := "melee"
 var orbit_groups: Array = []
+var skills: Array = []          # active abilities: {id, rank, timer}
+var dash = null                 # {vel, time, hit_mult, hits}
 
 var move_dir := Vector2.ZERO          # set each frame by Main (joystick + keys)
 var facing := 0.0
@@ -71,13 +74,28 @@ func radius() -> float:
 	return 14.0
 
 func add_orbit_group(count: int, mult: float, dist: float, speed: float, r: float, col: Color) -> void:
-	orbit_groups.append({"count": count, "mult": mult, "dist": dist, "speed": speed, "radius": r, "color": col, "orbs": []})
+	orbit_groups.append({"key": "weapon", "count": count, "mult": mult, "dist": dist, "speed": speed, "radius": r, "color": col, "orbs": []})
 
 func _physics_process(delta: float) -> void:
 	var main := get_tree().current_scene
-	moving = move_dir.length() > 0.1
-	velocity = move_dir.normalized() * move_speed if moving else Vector2.ZERO
-	move_and_slide()
+	if dash != null:
+		velocity = dash["vel"]
+		move_and_slide()
+		moving = true
+		facing = dash["vel"].angle()
+		if dash["hit_mult"] > 0.0:
+			for e in get_tree().get_nodes_in_group("enemies"):
+				var id := e.get_instance_id()
+				if not dash["hits"].has(id) and global_position.distance_to(e.global_position) < radius() + e.radius + 6.0:
+					dash["hits"][id] = true
+					e.take_damage(damage * dash["hit_mult"], false)
+		dash["time"] -= delta
+		if dash["time"] <= 0.0:
+			dash = null
+	else:
+		moving = move_dir.length() > 0.1
+		velocity = move_dir.normalized() * move_speed if moving else Vector2.ZERO
+		move_and_slide()
 
 	var foe := _nearest_enemy()
 	if foe != null:
@@ -98,8 +116,61 @@ func _physics_process(delta: float) -> void:
 			_attack_timer = attack_cooldown
 			_atk_t = 0.3
 
+	# Active abilities: attack abilities auto-fire on their cooldown.
+	for s in skills:
+		var def := Abilities.by_id(s["id"])
+		if Abilities.kind_of(def) == "attack":
+			s["timer"] -= delta
+			if s["timer"] <= 0.0:
+				Abilities.activate(def, self, main, s["rank"])
+				s["timer"] = Abilities.cooldown(def, s["rank"])
+				_atk_t = 0.3
+		elif s["timer"] > 0.0:
+			s["timer"] -= delta
+
 	_tick_orbitals(delta, main)
 	_update_anim(delta)
+
+func use_movement_ability() -> void:
+	var main := get_tree().current_scene
+	for s in skills:
+		var def := Abilities.by_id(s["id"])
+		if Abilities.kind_of(def) == "movement" and s["timer"] <= 0.0:
+			Abilities.activate(def, self, main, s["rank"])
+			s["timer"] = Abilities.cooldown(def, s["rank"])
+			return
+
+func start_dash(dir: Vector2, dist: float, hit_mult: float) -> void:
+	var dur := 0.16
+	dash = {"vel": dir * dist / dur, "time": dur, "hit_mult": hit_mult, "hits": {}}
+	invuln = maxf(invuln, 0.3)
+
+func owned_ranks() -> Dictionary:
+	var m := {}
+	for s in skills:
+		m[s["id"]] = s["rank"]
+	return m
+
+func apply_pick(option: Dictionary) -> void:
+	var def: Dictionary = option["ability"]
+	var inst = null
+	for s in skills:
+		if s["id"] == def["id"]:
+			inst = s; break
+	if inst == null:
+		inst = {"id": def["id"], "rank": 0, "timer": 0.0}
+		skills.append(inst)
+	inst["rank"] = option["next_rank"]
+	if Abilities.kind_of(def) == "orbit":
+		Abilities.sync_orbit(def, self, inst["rank"])
+
+func sync_orbit_group(key: String, count: int, mult: float, dist: float, speed: float, r: float, col: Color) -> void:
+	for g in orbit_groups:
+		if g.get("key", "") == key:
+			g["count"] = count; g["mult"] = mult; g["dist"] = dist
+			g["speed"] = speed; g["radius"] = r; g["color"] = col
+			return
+	orbit_groups.append({"key": key, "count": count, "mult": mult, "dist": dist, "speed": speed, "radius": r, "color": col, "orbs": []})
 
 func _tick_orbitals(delta: float, main: Node) -> void:
 	for g in orbit_groups:
@@ -144,6 +215,7 @@ func gain_xp(amount: float) -> void:
 		xp -= xp_next
 		level += 1
 		xp_next = floor(xp_next * 1.35 + 3.0)
+		leveled_up.emit()
 
 func _nearest_enemy() -> Node2D:
 	var best: Node2D = null
@@ -160,7 +232,8 @@ func _update_anim(delta: float) -> void:
 	if _hurt_t > 0.0: _hurt_t -= delta
 
 	var st := "idle"
-	if _atk_t > 0.0: st = "attack"
+	if dash != null: st = "dash"
+	elif _atk_t > 0.0: st = "attack"
 	elif _hurt_t > 0.0: st = "hurt"
 	elif moving: st = "walk"
 

@@ -25,11 +25,17 @@ Runnable core slice, validated headlessly (`--selftest`):
   i-frames, camera follow, ramping spawn director, PixelLab dungeon floor,
   touch+keyboard input, HUD (level/timer/HP), all six class stat blocks.
 
-### Phase 1 — Combat content
-- Port `js/weapons.js` (12 weapons: projectile / orbital / nova / beam types).
-- Port `js/abilities.js` + the level-up card UI and ability state machine.
-- Port the full `js/enemies.js` archetypes (skeleton/goblin/ogre/shooter/
-  exploder/splitter/charger) and their AI.
+### Phase 1 — Combat content (DONE)
+- `js/enemies.js` → `Enemy.gd` + `EnemyProjectile.gd`: all archetypes
+  (chaser/shooter/exploder/splitter/charger + miniboss/finalboss AI), enemy
+  projectiles, split/explode deaths, slow/burn, elites, weighted spawns.
+- `js/weapons.js` → `Weapons.gd`: all 12 weapons (melee/projectile/nova/orbital)
+  wired to the class starter weapon; combat ctx helpers on `Main`.
+- `js/abilities.js` → `Abilities.gd`: 36 ranked abilities across 8 mechanics
+  (nova/slam/volley/radial/chain/orbit/dash/blink), the level-up card UI with
+  pause + pick, attack auto-fire, keyed orbit sync, dash + blink movement, and a
+  movement-ability button. Headless self-test exercises every weapon, every
+  enemy archetype and every ability mechanic with no errors.
 
 ### Phase 2 — Bosses & run structure
 - Mini-bosses at 180/360/540s, final boss "The Warden" at 600s, victory state.
