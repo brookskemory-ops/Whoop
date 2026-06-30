@@ -37,9 +37,21 @@ Runnable core slice, validated headlessly (`--selftest`):
   movement-ability button. Headless self-test exercises every weapon, every
   enemy archetype and every ability mechanic with no errors.
 
-### Phase 2 — Bosses & run structure
-- Mini-bosses at 180/360/540s, final boss "The Warden" at 600s, victory state.
-- Boss health bar + banners.
+### Phase 2 — Bosses & run structure (DONE)
+- Boss timeline in `Main.gd`: mini-bosses ("Champion") at 180/360/540s, the
+  final boss ("The Warden") at 600s; normal spawns pause during the final boss
+  fight, matching `js/game.js`. `--fast` (or the `--bosstest` self-test) shrinks
+  this to 3/6/9s + 12s for quick iteration.
+- Boss health bar + event banners (mini-boss/final-boss announcements) on the HUD.
+- Win/lose flow: a `playing | dead | won` run state, pausing the tree and
+  showing an end screen (time/kills/gold + Restart) on either death or
+  defeating the Warden — ported from `die()`/`victory()`. Killing a mini-boss
+  heals the player +25 HP and shows "Champion Slain!"; the final boss has no
+  gem drop and ends the run immediately on death, matching the JS exactly.
+- Validated headlessly: `--bosstest` runs the fast timeline end-to-end (all 3
+  mini-bosses + the final boss spawn on schedule, killing the Warden flips the
+  state to "won"); `--deathtest` verifies lethal damage pauses with the death
+  screen and Restart returns to a fresh full-HP run. No script errors.
 
 ### Phase 3 — Meta & UX
 - Title / class-select / shop (Armory upgrades) / achievements / pause /

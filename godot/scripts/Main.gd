@@ -4,22 +4,38 @@ extends Node2D
 ## js/game.js — menus, abilities, bosses and meta-progression come in later phases.
 
 const SELECTED_CLASS := "knight"
-const WIN_TIME := 600.0
+
+var _win_time := 600.0
+var _mini_times := [180.0, 360.0, 540.0]
 
 var elapsed := 0.0
 var run_gold := 0.0
 var run_kills := 0
 var _spawn_timer := 0.0
+var _state := "playing"   # playing | dead | won
 
 var _world: Node2D
 var _player: Player
 var _camera: Camera2D
+
+# Boss timeline (ported from spawnBoss/MINI_TIMES/WIN_TIME in js/game.js)
+var _boss: Node = null
+var _next_mini := 0
+var _final_spawned := false
+var _banner_text := ""
+var _banner_timer := 0.0
+var _end_ui: CanvasLayer
 
 # HUD
 var _lbl_level: Label
 var _lbl_time: Label
 var _hp_fill: ColorRect
 var _hp_w := 200.0
+var _boss_bg: ColorRect
+var _boss_fill: ColorRect
+var _lbl_boss_name: Label
+var _boss_w := 280.0
+var _lbl_banner: Label
 
 # Touch / mouse joystick
 var _joy_active := false
@@ -39,11 +55,21 @@ var _test_dir := Vector2.ZERO
 
 func _ready() -> void:
 	randomize()
+	if _has_flag("--fast") or _has_flag("--bosstest"):
+		_win_time = 12.0
+		_mini_times = [3.0, 6.0, 9.0]
 	_build_world()
 	_build_hud()
 	_start_run()
-	if "--selftest" in OS.get_cmdline_user_args() or "--selftest" in OS.get_cmdline_args():
+	if _has_flag("--selftest"):
 		_run_selftest()
+	elif _has_flag("--bosstest"):
+		_run_bosstest()
+	elif _has_flag("--deathtest"):
+		_run_deathtest()
+
+func _has_flag(name: String) -> bool:
+	return name in OS.get_cmdline_args() or name in OS.get_cmdline_user_args()
 
 func _build_world() -> void:
 	_world = Node2D.new()
@@ -74,6 +100,9 @@ func _start_run() -> void:
 	_camera.make_current()
 
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
+	_boss = null; _next_mini = 0; _final_spawned = false
+	_banner_text = ""; _banner_timer = 0.0
+	_state = "playing"
 
 func add_gold(amount: float) -> void:
 	run_gold += amount
@@ -84,17 +113,53 @@ func add_kill() -> void:
 func _process(delta: float) -> void:
 	if _player == null or not is_instance_valid(_player):
 		return
+	if _state != "playing":
+		return
 	elapsed += delta
 	_player.move_dir = _test_dir if _testing else _read_input()
 
-	# Spawn director: interval tightens over the run (ported from js/game.js).
-	_spawn_timer -= delta
-	var interval: float = max(0.16, 1.1 - elapsed * 0.01)
-	if _spawn_timer <= 0.0:
-		_spawn_enemy()
-		_spawn_timer = interval
+	# Spawn director: interval tightens over the run; normal spawns pause during
+	# the final boss fight (ported from js/game.js).
+	var boss_active_final: bool = _boss != null and is_instance_valid(_boss) and _boss.is_final
+	if not boss_active_final:
+		_spawn_timer -= delta
+		var interval: float = max(0.16, 1.1 - elapsed * 0.01)
+		if _spawn_timer <= 0.0:
+			_spawn_enemy()
+			_spawn_timer = interval
+
+	# Boss timeline: mini-bosses at fixed times, the final boss at _win_time.
+	while _next_mini < _mini_times.size() and elapsed >= _mini_times[_next_mini]:
+		spawn_boss("miniboss")
+		_next_mini += 1
+	if not _final_spawned and elapsed >= _win_time:
+		spawn_boss("finalboss")
+		_final_spawned = true
+
+	if _banner_timer > 0.0:
+		_banner_timer -= delta
 
 	_update_hud()
+
+func spawn_boss(key: String) -> void:
+	var ang := randf() * TAU
+	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.55 + 60.0
+	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
+	_boss = add_enemy(key, pos, 1.0 + (elapsed / 60.0) * 0.06)
+	_show_banner("The Warden Awakens" if key == "finalboss" else "A Champion Approaches")
+
+func _show_banner(text: String) -> void:
+	_banner_text = text
+	_banner_timer = 2.6
+
+func on_boss_killed(e: Node) -> void:
+	if _boss == e:
+		_boss = null
+	if e.is_final:
+		_trigger_victory()
+	else:
+		_player.hp = min(_player.max_hp, _player.hp + 25.0)
+		_show_banner("Champion Slain!")
 
 func _spawn_enemy() -> void:
 	var m := elapsed / 60.0
@@ -173,8 +238,12 @@ func spawn_player_projectile(pos: Vector2, vel: Vector2, dmg: float, crit: bool,
 	pr.setup(pos, vel, dmg, crit, pierce, r, col, on_hit)
 	_world.add_child(pr)
 
-func on_final_boss_killed() -> void:
-	pass  # victory state — Phase 2
+func _trigger_victory() -> void:
+	if _state != "playing":
+		return
+	_state = "won"
+	get_tree().paused = true
+	_show_end_screen("Victory!")
 
 # ── Level-up: pick an ability (ported from openLevelUp in js/game.js) ──────────
 func _on_level_up() -> void:
@@ -276,13 +345,70 @@ func _build_hud() -> void:
 	ab_btn.pressed.connect(func(): if _player: _player.use_movement_ability())
 	layer.add_child(ab_btn)
 
+	# Boss health bar (hidden until a boss is present).
+	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 52)
+	_lbl_boss_name.visible = false; layer.add_child(_lbl_boss_name)
+	_boss_bg = ColorRect.new()
+	_boss_bg.color = Color(0, 0, 0, 0.5); _boss_bg.position = Vector2(100, 70); _boss_bg.size = Vector2(_boss_w, 10)
+	_boss_bg.visible = false; layer.add_child(_boss_bg)
+	_boss_fill = ColorRect.new()
+	_boss_fill.color = Color("b14a8a"); _boss_fill.position = Vector2(100, 70); _boss_fill.size = Vector2(_boss_w, 10)
+	_boss_fill.visible = false; layer.add_child(_boss_fill)
+
+	# Event banner (mini-boss/final-boss announcements).
+	_lbl_banner = Label.new()
+	_lbl_banner.position = Vector2(60, 160); _lbl_banner.custom_minimum_size = Vector2(360, 0)
+	_lbl_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_banner.visible = false
+	layer.add_child(_lbl_banner)
+
 func _update_hud() -> void:
 	_lbl_level.text = "Lv %d" % _player.level
 	_lbl_time.text = "%d:%02d" % [int(elapsed) / 60, int(elapsed) % 60]
 	_hp_fill.size.x = _hp_w * clampf(_player.hp / _player.max_hp, 0.0, 1.0)
 
+	var boss_live: bool = _boss != null and is_instance_valid(_boss) and _boss.hp > 0.0
+	_boss_bg.visible = boss_live; _boss_fill.visible = boss_live; _lbl_boss_name.visible = boss_live
+	if boss_live:
+		_lbl_boss_name.text = "The Warden" if _boss.is_final else "Champion"
+		_boss_fill.size.x = _boss_w * clampf(_boss.hp / _boss.max_hp, 0.0, 1.0)
+
+	_lbl_banner.visible = _banner_timer > 0.0
+	if _banner_timer > 0.0:
+		_lbl_banner.text = _banner_text
+		_lbl_banner.modulate.a = clampf(_banner_timer / 0.5, 0.0, 1.0)
+
 func _on_player_died() -> void:
-	# Foundation: just restart the run. Game-over screen + meta come later.
+	if _state != "playing":
+		return
+	_state = "dead"
+	get_tree().paused = true
+	_show_end_screen("You Died")
+
+func _show_end_screen(title: String) -> void:
+	_end_ui = CanvasLayer.new()
+	_end_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_end_ui)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.7); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_end_ui.add_child(dim)
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_CENTER)
+	vbox.position = Vector2(90, 280); vbox.custom_minimum_size = Vector2(300, 0)
+	vbox.add_theme_constant_override("separation", 12)
+	_end_ui.add_child(vbox)
+	var t := Label.new(); t.text = title; vbox.add_child(t)
+	var stats := Label.new()
+	stats.text = "Time: %d:%02d\nKills: %d\nGold: %d" % [int(elapsed) / 60, int(elapsed) % 60, run_kills, int(run_gold)]
+	vbox.add_child(stats)
+	var btn := Button.new(); btn.text = "Restart"; btn.custom_minimum_size = Vector2(200, 48)
+	btn.pressed.connect(_restart_run)
+	vbox.add_child(btn)
+
+func _restart_run() -> void:
+	if _end_ui:
+		_end_ui.queue_free(); _end_ui = null
+	get_tree().paused = false
 	for c in _world.get_children():
 		c.queue_free()
 	call_deferred("_build_world")
@@ -328,4 +454,35 @@ func _run_selftest() -> void:
 	print("[SELFTEST] elapsed=%.1f hp=%.0f/%.0f level=%d enemies=%d kills=%d gold=%.0f proj=%d gems=%d skills=%d anim_texture_ok=%s moved=%s" % [
 		elapsed, _player.hp, _player.max_hp, _player.level, enemies, run_kills, run_gold,
 		projectiles, gems, _player.skills.size(), str(sprite_ok), str(_player.global_position.length() > 1.0)])
+	get_tree().quit(0)
+
+# Drives the (fast) boss timeline end to end: mini-bosses -> final boss -> victory.
+func _run_bosstest() -> void:
+	_testing = true
+	_auto_pick = true
+	var t := 0.0
+	while t < 13.0 and _state == "playing":
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		_test_dir = Vector2(cos(t * 0.5), sin(t * 0.3))
+		# Burst down whatever boss is currently up so the timeline advances
+		# within the test budget instead of waiting out a real boss fight.
+		if _boss != null and is_instance_valid(_boss):
+			_boss.take_damage(400.0, false)
+	print("[BOSSTEST] elapsed=%.1f state=%s minis_spawned=%d kills=%d gold=%.0f" % [
+		t, _state, _next_mini, run_kills, run_gold])
+	get_tree().quit(0)
+
+# Verifies the death/game-over path: lethal damage -> "dead" state, paused,
+# end screen shown, then Restart returns to a fresh "playing" run.
+func _run_deathtest() -> void:
+	await get_tree().process_frame
+	_player.take_damage(999999.0)
+	await get_tree().process_frame
+	var dead_ok := _state == "dead" and get_tree().paused and _end_ui != null
+	_restart_run()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var restart_ok := _state == "playing" and not get_tree().paused and _player.hp == _player.max_hp
+	print("[DEATHTEST] dead_ok=%s restart_ok=%s" % [str(dead_ok), str(restart_ok)])
 	get_tree().quit(0)

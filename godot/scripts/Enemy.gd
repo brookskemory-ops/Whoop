@@ -158,8 +158,13 @@ func _die() -> void:
 			main.add_enemy("spawnling", global_position + Vector2(cos(ang), sin(ang)) * 16.0, 1.0)
 	if main.has_method("add_kill"):
 		main.add_kill()
-	if is_final and main.has_method("on_final_boss_killed"):
-		main.on_final_boss_killed()
+	if is_boss and main.has_method("on_boss_killed"):
+		main.on_boss_killed(self)
+	if is_final:
+		# Ported from killEnemy in js/game.js: the final boss triggers victory
+		# and the run ends immediately, with no gem drop.
+		queue_free()
+		return
 	var gem := preload("res://scripts/Gem.gd").new()
 	gem.setup(global_position, xp, gold)
 	main.get_node("World").add_child(gem)
