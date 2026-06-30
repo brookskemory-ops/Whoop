@@ -1,173 +1,238 @@
-// ── Ironvow: procedural art ────────────────────────────────────────────────
-// All textures/sprites are drawn in code ONCE into offscreen canvases, then blitted
-// each frame (cheap on phones — no per-frame gradients/shadows). Gritty dark-dungeon
-// palette. Nothing here is loaded from disk.
+// ── Ironvow: hand-authored pixel-art sprites ───────────────────────────────
+// Every creature/character/projectile is painted pixel-by-pixel into a tiny
+// canvas, then upscaled with smoothing OFF for crisp 16-bit-style art. Sprites
+// face "front" and are flipped left/right by the renderer; a 2-frame bob in
+// game.js gives them life. The stone floor + eye-glow are unchanged.
 
 const Art = (() => {
-  function make(w, h) {
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    return c;
-  }
-  // Deterministic value noise so tiles look the same every load.
-  function hash2(x, y) {
-    let h = (x * 374761393 + y * 668265263) >>> 0;
-    h = (h ^ (h >>> 13)) * 1274126177 >>> 0;
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-  }
+  function canvasOf(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  function hash2(x, y) { let h = (x * 374761393 + y * 668265263) >>> 0; h = (h ^ (h >>> 13)) * 1274126177 >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+  function shade(hex, f) { const n = parseInt(hex.slice(1), 16); return `rgb(${Math.round(((n >> 16) & 255) * f)},${Math.round(((n >> 8) & 255) * f)},${Math.round((n & 255) * f)})`; }
+  function light(hex, f) { const n = parseInt(hex.slice(1), 16); const m = (v) => Math.min(255, Math.round(v + (255 - v) * f)); return `rgb(${m((n >> 16) & 255)},${m((n >> 8) & 255)},${m(n & 255)})`; }
 
-  // ── Floor: a tiling dark-stone slab with grout, speckle and the odd crack ──
-  const TILE = 128;
-  function buildFloorTile() {
-    const c = make(TILE, TILE), g = c.getContext('2d');
-    g.fillStyle = '#1b1812'; g.fillRect(0, 0, TILE, TILE);
-    // 2x2 stone slabs with bevelled grout
-    const half = TILE / 2;
-    for (let sx = 0; sx < 2; sx++) for (let sy = 0; sy < 2; sy++) {
-      const x = sx * half, y = sy * half;
-      const tone = 28 + Math.floor(hash2(sx + 7, sy + 3) * 18);
-      g.fillStyle = `rgb(${tone + 6},${tone + 2},${tone - 4})`;
-      g.fillRect(x + 2, y + 2, half - 4, half - 4);
-      // top/left highlight, bottom/right shadow
-      g.fillStyle = 'rgba(255,235,200,0.05)'; g.fillRect(x + 2, y + 2, half - 4, 2);
-      g.fillStyle = 'rgba(255,235,200,0.04)'; g.fillRect(x + 2, y + 2, 2, half - 4);
-      g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x + 2, y + half - 4, half - 4, 2);
-      g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(x + half - 4, y + 2, 2, half - 4);
-    }
-    // speckle
-    for (let i = 0; i < 360; i++) {
-      const x = Math.floor(hash2(i, 11) * TILE), y = Math.floor(hash2(i, 29) * TILE);
-      const v = hash2(i, 47);
-      g.fillStyle = v > 0.5 ? 'rgba(255,240,210,0.05)' : 'rgba(0,0,0,0.22)';
-      g.fillRect(x, y, 1, 1);
-    }
-    // occasional crack
-    if (true) {
-      g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 1.5;
-      g.beginPath();
-      let x = 20, y = 96; g.moveTo(x, y);
-      for (let i = 0; i < 6; i++) { x += 8 + hash2(i, 5) * 12; y += (hash2(i, 9) - 0.5) * 16; g.lineTo(x, y); }
-      g.stroke();
-    }
-    return c;
-  }
-  let floorTile = null, floorPattern = null;
-  function floorPatternFor(ctx) {
-    if (!floorTile) floorTile = buildFloorTile();
-    if (!floorPattern) floorPattern = ctx.createPattern(floorTile, 'repeat');
-    return floorPattern;
-  }
-
-  // ── Enemy sprites (drawn facing +x; rotated at draw time) ──────────────────
-  const enemyCache = {};
-  function buildEnemy(type) {
-    const defs = {
-      skeleton: { r: 12, body: '#d8d4c2', shade: '#9a9684', eye: '#cfeaff' },
-      goblin: { r: 11, body: '#7bbf63', shade: '#4f8a3e', eye: '#ffe27a' },
-      ogre: { r: 21, body: '#9b59b6', shade: '#6c3b80', eye: '#ff6a6a' },
-      shooter: { r: 12, body: '#6aa9ff', shade: '#3a6bb0', eye: '#eaf4ff' },
-      exploder: { r: 13, body: '#e8893a', shade: '#a65616', eye: '#fff0c0' },
-      splitter: { r: 16, body: '#caa24a', shade: '#8a6a22', eye: '#fff0c0' },
-      charger: { r: 15, body: '#d05a7a', shade: '#8c2f4c', eye: '#ffd0dc' },
-      miniboss: { r: 34, body: '#b14a8a', shade: '#6c2754', eye: '#ffd0f0' },
-      finalboss: { r: 48, body: '#c0341f', shade: '#7a160a', eye: '#ffd06a' },
+  // Paint into an N×N grid then upscale to `disp` px. Returns {canvas, cx, cy}.
+  function pixel(paint, native, disp) {
+    const base = canvasOf(native, native), g = base.getContext('2d');
+    const P = {
+      set: (x, y, c) => { g.fillStyle = c; g.fillRect(x | 0, y | 0, 1, 1); },
+      rect: (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(x | 0, y | 0, w | 0, h | 0); },
+      // mirror a column-symmetric pixel: draws at x and (N-1-x)
+      sym: (x, y, c, n) => { g.fillStyle = c; g.fillRect(x | 0, y | 0, 1, 1); g.fillRect((n - 1 - x) | 0, y | 0, 1, 1); },
     };
-    const d = defs[type], R = d.r, S = R * 2 + 8, cx = S / 2, cy = S / 2;
-    const c = make(S, S), g = c.getContext('2d');
-    // body with radial shading
-    const grd = g.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.2, cx, cy, R);
-    grd.addColorStop(0, d.body); grd.addColorStop(1, d.shade);
-    g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 2; g.stroke();
-    // simple facial features near the front (+x side)
-    const ex = cx + R * 0.4;
-    g.fillStyle = '#0c0a08';
-    g.beginPath(); g.arc(ex, cy - R * 0.32, R * 0.22, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(ex, cy + R * 0.32, R * 0.22, 0, Math.PI * 2); g.fill();
-    g.fillStyle = d.eye;
-    g.beginPath(); g.arc(ex + 0.5, cy - R * 0.32, R * 0.1, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(ex + 0.5, cy + R * 0.32, R * 0.1, 0, Math.PI * 2); g.fill();
-    if (type === 'skeleton') { // ribs
-      g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 1;
-      for (let i = -1; i <= 1; i++) { g.beginPath(); g.arc(cx - R * 0.2, cy, R * 0.55 + i * 3, -0.7, 0.7); g.stroke(); }
-    }
-    return { canvas: c, cx, cy, R, eyeColor: d.eye };
-  }
-  function enemySprite(type) { return enemyCache[type] || (enemyCache[type] = buildEnemy(type)); }
-
-  // ── Player class sprites (facing +x) ───────────────────────────────────────
-  const classCache = {};
-  function buildClass(classId, color) {
-    const R = 15, S = R * 2 + 12, cx = S / 2, cy = S / 2;
-    const c = make(S, S), g = c.getContext('2d');
-    const grd = g.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.2, cx, cy, R);
-    grd.addColorStop(0, '#fdfdfd'); grd.addColorStop(0.25, color); grd.addColorStop(1, shade(color, 0.55));
-    g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 2; g.stroke();
-    // emblem hint per class, on the front
-    g.fillStyle = 'rgba(15,12,8,0.85)'; g.strokeStyle = 'rgba(15,12,8,0.85)'; g.lineWidth = 2.5;
-    g.save(); g.translate(cx, cy);
-    const fx = R * 0.45;
-    if (classId === 'knight') { g.fillRect(fx - 4, -5, 8, 10); } // shield
-    else if (classId === 'archer') { g.beginPath(); g.arc(fx, 0, 6, -1.1, 1.1); g.stroke(); } // bow
-    else if (classId === 'mage') { g.beginPath(); g.moveTo(fx - 4, 6); g.lineTo(fx, -7); g.lineTo(fx + 4, 6); g.closePath(); g.fill(); } // hat
-    else if (classId === 'rogue') { g.beginPath(); g.moveTo(fx - 4, -4); g.lineTo(fx + 5, 0); g.lineTo(fx - 4, 4); g.closePath(); g.fill(); } // dagger
-    else if (classId === 'cleric') { g.fillRect(fx - 1.5, -7, 3, 14); g.fillRect(fx - 5, -2, 10, 3); } // cross
-    else if (classId === 'barbarian') { g.beginPath(); g.arc(fx + 1, 0, 6, -1.3, 1.3); g.lineWidth = 3; g.stroke(); g.fillRect(fx - 4, -1.5, 6, 3); } // axe
-    g.restore();
-    return { canvas: c, cx, cy, R };
-  }
-  function classSprite(classId) {
-    if (classCache[classId]) return classCache[classId];
-    const cls = window.CLASS_BY_ID[classId];
-    return (classCache[classId] = buildClass(classId, cls ? cls.color : '#cccccc'));
+    paint(P, native);
+    const out = canvasOf(disp, disp), og = out.getContext('2d');
+    og.imageSmoothingEnabled = false;
+    og.drawImage(base, 0, 0, disp, disp);
+    return { canvas: out, cx: disp / 2, cy: disp / 2 };
   }
 
-  // ── Glowing projectile sprites, cached by color+size+shape ─────────────────
-  const projCache = {};
-  function buildProj(color, size, shape) {
-    const pad = size * 3, S = Math.ceil(size * 6 + pad);
-    const c = make(S, S), g = c.getContext('2d'), cx = S / 2, cy = S / 2;
-    // glow
-    const gr = g.createRadialGradient(cx, cy, 0, cx, cy, size * 2.2);
-    gr.addColorStop(0, color); gr.addColorStop(0.4, color + '88'); gr.addColorStop(1, color + '00');
-    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, size * 2.2, 0, Math.PI * 2); g.fill();
-    g.fillStyle = color; g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 1;
-    if (shape === 'arrow' || shape === 'bolt') {
-      g.beginPath(); g.moveTo(cx + size * 2, cy); g.lineTo(cx - size, cy - size); g.lineTo(cx - size * 0.4, cy); g.lineTo(cx - size, cy + size); g.closePath(); g.fill();
-    } else if (shape === 'blade') {
-      g.beginPath(); g.moveTo(cx + size * 2, cy); g.lineTo(cx - size, cy - size * 1.1); g.lineTo(cx - size, cy + size * 1.1); g.closePath(); g.fill();
-    } else if (shape === 'axe') {
-      g.beginPath(); g.arc(cx + size * 0.5, cy, size * 1.6, -1.2, 1.2); g.lineWidth = size; g.strokeStyle = color; g.stroke();
-    } else { // orb
-      g.beginPath(); g.arc(cx, cy, size, 0, Math.PI * 2); g.fill();
-      g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.arc(cx - size * 0.3, cy - size * 0.3, size * 0.4, 0, Math.PI * 2); g.fill();
-    }
-    return { canvas: c, cx, cy };
+  // ── Shared humanoid base for the 6 classes (16×16, front-facing) ───────────
+  function humanoid(P, c) {
+    const N = 16, S = (x, y, col) => P.sym(x, y, col, N);
+    // legs
+    P.rect(5, 13, 2, 3, c.legs); P.rect(9, 13, 2, 3, c.legs);
+    P.rect(5, 15, 2, 1, '#14110d'); P.rect(9, 15, 2, 1, '#14110d');
+    // torso
+    P.rect(4, 7, 8, 6, c.body);
+    P.rect(4, 11, 8, 2, shade(c.body, 0.7));
+    P.rect(4, 7, 8, 1, light(c.body, 0.25));
+    // arms
+    P.rect(3, 7, 1, 5, c.body); P.rect(12, 7, 1, 5, c.body);
+    P.set(3, 12, c.skin); P.set(12, 12, c.skin); // hands
+    // head
+    P.rect(5, 2, 6, 5, c.head);
+    P.rect(5, 2, 6, 1, light(c.head, 0.2));
+    // eyes
+    P.set(6, 4, c.eye || '#1a1410'); P.set(9, 4, c.eye || '#1a1410');
+  }
+
+  const CLASS_PAINT = {
+    knight: (P) => {
+      humanoid(P, { head: '#c9d1e0', body: '#aab3c6', legs: '#566074', skin: '#d8b48a', eye: '#1a1410' });
+      P.rect(7, 0, 2, 2, '#e8c14a');            // plume
+      P.rect(5, 4, 6, 1, '#3a3f4a');            // visor slit
+      P.rect(13, 3, 1, 8, '#e7edf7'); P.set(13, 2, '#fff'); // sword
+      P.rect(2, 7, 2, 4, '#7a4a2a'); P.set(2, 8, '#caa24a'); P.set(3, 9, '#caa24a'); // shield
+    },
+    archer: (P) => {
+      humanoid(P, { head: '#6f5a3a', body: '#5f8f4a', legs: '#3c5a2c', skin: '#d8b48a', eye: '#fff' });
+      P.rect(5, 1, 6, 2, '#3c5a2c');            // hood
+      P.rect(13, 3, 1, 8, '#8a5a2a'); P.set(12, 3, '#8a5a2a'); P.set(12, 10, '#8a5a2a'); P.set(13, 6, '#e7edf7'); // bow + arrow
+    },
+    mage: (P) => {
+      humanoid(P, { head: '#e8c79a', body: '#5a7fd0', legs: '#3a4f86', skin: '#e8c79a', eye: '#1a1410' });
+      P.rect(6, 0, 4, 1, '#3a4f86'); P.rect(5, 1, 6, 1, '#4a63a8'); P.set(7, -0, '#6aa9ff'); // wizard hat
+      P.rect(4, 1, 8, 1, '#3a4f86');
+      P.rect(12, 2, 1, 9, '#8a5a2a'); P.rect(11, 1, 3, 2, '#7fd0ff'); // staff + orb
+    },
+    rogue: (P) => {
+      humanoid(P, { head: '#caa24a', body: '#8a7430', legs: '#4a3e1c', skin: '#caa24a', eye: '#fff' });
+      P.rect(5, 1, 6, 2, '#2a2418');           // hood
+      P.rect(4, 5, 8, 1, '#2a2418');           // mask band
+      P.set(2, 9, '#e7edf7'); P.set(13, 9, '#e7edf7'); // twin daggers
+      P.set(2, 10, '#8a8a8a'); P.set(13, 10, '#8a8a8a');
+    },
+    cleric: (P) => {
+      humanoid(P, { head: '#e8c79a', body: '#efe6b6', legs: '#b8ad7e', skin: '#e8c79a', eye: '#1a1410' });
+      P.rect(7, 6, 2, 4, '#d9b25a'); P.rect(6, 7, 4, 1, '#d9b25a'); // chest cross
+      P.rect(13, 2, 1, 9, '#cbb06a'); P.rect(12, 2, 3, 1, '#f0e6b0'); P.set(13, 1, '#fff'); // holy staff
+    },
+    barbarian: (P) => {
+      humanoid(P, { head: '#d8a070', body: '#b65a3a', legs: '#6e3a24', skin: '#d8a070', eye: '#1a1410' });
+      P.rect(4, 2, 8, 1, '#3a2a1a');           // hair band
+      P.set(4, 2, '#d8d0c0'); P.set(11, 2, '#d8d0c0'); // horns
+      P.rect(4, 8, 8, 1, '#d8a070');           // bare chest
+      P.rect(13, 1, 1, 6, '#8a5a2a'); P.rect(12, 1, 3, 3, '#c9d1e0'); // big axe
+    },
+  };
+
+  // ── Enemies (16×16) ────────────────────────────────────────────────────────
+  function blob(P, c, eye) {
+    P.rect(4, 5, 8, 8, c); P.rect(3, 7, 1, 4, c); P.rect(12, 7, 1, 4, c);
+    P.rect(4, 12, 8, 1, shade(c, 0.6)); P.rect(4, 5, 8, 1, light(c, 0.25));
+    P.set(6, 8, eye); P.set(9, 8, eye);
+  }
+  const ENEMY_PAINT = {
+    skeleton: (P) => {
+      P.rect(5, 2, 6, 5, '#e8e4d4'); P.rect(5, 6, 6, 1, '#b8b4a4');     // skull
+      P.set(6, 4, '#1a1410'); P.set(9, 4, '#1a1410'); P.set(7, 5, '#1a1410');
+      P.rect(5, 8, 6, 5, '#d8d4c2');                                     // ribcage
+      P.set(5, 9, '#9a9684'); P.set(10, 9, '#9a9684'); P.set(5, 11, '#9a9684'); P.set(10, 11, '#9a9684');
+      P.rect(4, 9, 1, 3, '#d8d4c2'); P.rect(11, 9, 1, 3, '#d8d4c2');     // arms
+      P.rect(5, 13, 2, 3, '#c8c4b2'); P.rect(9, 13, 2, 3, '#c8c4b2');    // legs
+    },
+    goblin: (P) => {
+      P.rect(4, 4, 8, 7, '#7bbf63'); P.rect(4, 10, 8, 1, '#4f8a3e');
+      P.rect(2, 5, 2, 2, '#7bbf63'); P.rect(12, 5, 2, 2, '#7bbf63');     // big ears
+      P.set(6, 6, '#ffe27a'); P.set(9, 6, '#ffe27a'); P.set(6, 7, '#1a1410'); P.set(9, 7, '#1a1410');
+      P.set(7, 9, '#fff'); P.set(8, 9, '#fff');                          // fangs
+      P.rect(5, 11, 2, 4, '#4f8a3e'); P.rect(9, 11, 2, 4, '#4f8a3e');
+    },
+    ogre: (P) => {
+      P.rect(3, 3, 10, 10, '#9b59b6'); P.rect(3, 11, 10, 2, '#6c3b80');
+      P.rect(2, 6, 1, 5, '#9b59b6'); P.rect(13, 6, 1, 5, '#9b59b6');     // arms
+      P.set(6, 6, '#ff6a6a'); P.set(9, 6, '#ff6a6a');
+      P.rect(6, 6, 1, 1, '#fff'); P.rect(9, 6, 1, 1, '#fff');
+      P.set(5, 9, '#fff'); P.set(10, 9, '#fff');                         // tusks
+      P.rect(4, 13, 3, 3, '#6c3b80'); P.rect(9, 13, 3, 3, '#6c3b80');
+    },
+    shooter: (P) => { // hooded blue caster
+      P.rect(4, 2, 8, 4, '#3a6bb0'); P.rect(5, 3, 6, 3, '#1a2a4a');      // hood/shadow
+      P.set(6, 4, '#9ad0ff'); P.set(9, 4, '#9ad0ff');                    // glowing eyes
+      P.rect(4, 6, 8, 7, '#6aa9ff'); P.rect(4, 11, 8, 2, '#3a6bb0');
+      P.rect(11, 7, 2, 2, '#cdebff');                                    // casting hand glow
+    },
+    exploder: (P) => { // round bomb-beast with fuse
+      P.rect(4, 5, 8, 8, '#e8893a'); P.rect(3, 7, 1, 4, '#e8893a'); P.rect(12, 7, 1, 4, '#e8893a');
+      P.rect(4, 11, 8, 2, '#a65616'); P.rect(4, 5, 8, 1, '#ffb060');
+      P.set(6, 8, '#1a1410'); P.set(9, 8, '#1a1410'); P.rect(6, 10, 4, 1, '#7a3a10'); // angry mouth
+      P.set(8, 3, '#ffec88'); P.set(8, 2, '#ff5a2a'); P.set(7, 4, '#3a2a1a');         // lit fuse
+    },
+    splitter: (P) => { // amber slime
+      P.rect(3, 7, 10, 6, '#caa24a'); P.rect(4, 5, 8, 2, '#caa24a');
+      P.rect(3, 12, 10, 1, '#8a6a22'); P.rect(4, 5, 8, 1, '#e8c878');
+      P.set(6, 8, '#1a1410'); P.set(9, 8, '#1a1410');
+      P.set(4, 13, '#caa24a'); P.set(8, 13, '#caa24a'); P.set(11, 13, '#caa24a'); // droplets
+    },
+    charger: (P) => { // horned beast, head lowered
+      P.rect(4, 5, 8, 7, '#d05a7a'); P.rect(4, 10, 8, 2, '#8c2f4c');
+      P.set(3, 4, '#e8d0d8'); P.set(12, 4, '#e8d0d8'); P.set(2, 3, '#e8d0d8'); P.set(13, 3, '#e8d0d8'); // horns
+      P.set(6, 7, '#ffd0dc'); P.set(9, 7, '#ffd0dc');
+      P.rect(6, 9, 4, 1, '#fff');                                        // bared teeth
+      P.rect(5, 12, 2, 3, '#8c2f4c'); P.rect(9, 12, 2, 3, '#8c2f4c');
+    },
+  };
+
+  // ── Bosses (16×16, upscaled large) ─────────────────────────────────────────
+  const BOSS_PAINT = {
+    miniboss: (P) => { // armored purple champion w/ crown
+      P.rect(3, 3, 10, 10, '#b14a8a'); P.rect(3, 11, 10, 2, '#6c2754');
+      P.rect(4, 1, 8, 2, '#f0c869'); P.set(5, 0, '#f0c869'); P.set(8, 0, '#f0c869'); P.set(10, 0, '#f0c869'); // crown
+      P.set(6, 6, '#ffd0f0'); P.set(9, 6, '#ffd0f0'); P.rect(6, 6, 1, 1, '#fff'); P.rect(9, 6, 1, 1, '#fff');
+      P.rect(2, 6, 1, 6, '#b14a8a'); P.rect(13, 6, 1, 6, '#b14a8a');
+      P.rect(0, 5, 2, 8, '#8a8f9a'); P.rect(14, 4, 2, 9, '#c9d1e0'); // shield + great-blade
+      P.rect(4, 13, 3, 3, '#6c2754'); P.rect(9, 13, 3, 3, '#6c2754');
+    },
+    finalboss: (P) => { // crimson horned warden
+      P.rect(3, 3, 10, 10, '#c0341f'); P.rect(3, 11, 10, 2, '#7a160a');
+      P.set(2, 2, '#2a0a06'); P.set(3, 1, '#2a0a06'); P.set(13, 2, '#2a0a06'); P.set(12, 1, '#2a0a06'); // horns
+      P.rect(2, 1, 2, 2, '#3a140a'); P.rect(12, 1, 2, 2, '#3a140a');
+      P.rect(5, 6, 2, 2, '#ffd06a'); P.rect(9, 6, 2, 2, '#ffd06a');  // burning eyes
+      P.set(6, 6, '#fff'); P.set(10, 6, '#fff');
+      P.rect(5, 10, 6, 1, '#ffd06a'); P.set(6, 11, '#ffd06a'); P.set(9, 11, '#ffd06a'); // grin
+      P.rect(0, 5, 2, 8, '#1a1410'); P.rect(14, 5, 2, 8, '#1a1410'); // clawed arms
+      P.rect(4, 13, 3, 3, '#7a160a'); P.rect(9, 13, 3, 3, '#7a160a');
+    },
+  };
+
+  // ── Projectiles / pickups (recoloured by passed `color`) ───────────────────
+  function projPaint(shape, color) {
+    const tip = light(color, 0.5), dk = shade(color, 0.6);
+    return (P) => {
+      if (shape === 'arrow' || shape === 'bolt') {
+        P.rect(1, 4, 5, 1, dk);                      // shaft (points +x)
+        P.rect(6, 3, 2, 3, color); P.set(8, 4, tip); // head
+        P.set(0, 3, '#f4f0e0'); P.set(0, 5, '#f4f0e0'); // fletch
+      } else if (shape === 'blade') {
+        P.rect(2, 4, 4, 1, color); P.set(6, 3, tip); P.set(6, 4, tip); P.set(6, 5, tip); P.rect(1, 4, 1, 1, '#5a4a2a');
+      } else if (shape === 'axe') {
+        P.rect(3, 3, 1, 3, '#6a4a2a'); P.rect(4, 2, 3, 1, color); P.rect(4, 6, 3, 1, color); P.rect(5, 2, 2, 5, color); P.set(6, 3, tip);
+      } else { // orb / fireball
+        P.rect(3, 2, 3, 4, color); P.rect(2, 3, 5, 2, color); P.set(4, 3, tip); P.set(3, 2, dk); P.set(5, 5, dk);
+      }
+    };
+  }
+
+  // ── Build caches (display sizes tuned to entity radii) ─────────────────────
+  const DISP = {
+    knight: 36, archer: 36, mage: 36, rogue: 36, cleric: 36, barbarian: 36,
+    skeleton: 30, goblin: 28, ogre: 50, shooter: 32, exploder: 34, splitter: 40, charger: 38,
+    miniboss: 90, finalboss: 122,
+  };
+  const classCache = {}, enemyCache = {}, projCache = {};
+  function classSprite(id) { return classCache[id] || (classCache[id] = pixel(CLASS_PAINT[id] || CLASS_PAINT.knight, 16, DISP[id] || 36)); }
+  function enemySprite(type) {
+    if (enemyCache[type]) return enemyCache[type];
+    const paint = ENEMY_PAINT[type] || BOSS_PAINT[type] || ENEMY_PAINT.skeleton;
+    return (enemyCache[type] = pixel(paint, 16, DISP[type] || 32));
   }
   function projSprite(color, size, shape) {
     const key = `${color}|${Math.round(size)}|${shape}`;
-    return projCache[key] || (projCache[key] = buildProj(color, Math.max(3, size), shape || 'orb'));
+    if (projCache[key]) return projCache[key];
+    const disp = Math.max(12, Math.round(size * 3.4));
+    return (projCache[key] = pixel(projPaint(shape || 'orb', color), 9, disp));
   }
 
-  // ── Eye-glow for enemies lurking in darkness ───────────────────────────────
+  // ── Stone floor (unchanged) ────────────────────────────────────────────────
+  const TILE = 128;
+  function buildFloorTile() {
+    const c = canvasOf(TILE, TILE), g = c.getContext('2d');
+    g.fillStyle = '#1b1812'; g.fillRect(0, 0, TILE, TILE);
+    const half = TILE / 2;
+    for (let sx = 0; sx < 2; sx++) for (let sy = 0; sy < 2; sy++) {
+      const x = sx * half, y = sy * half, tone = 28 + Math.floor(hash2(sx + 7, sy + 3) * 18);
+      g.fillStyle = `rgb(${tone + 6},${tone + 2},${tone - 4})`; g.fillRect(x + 2, y + 2, half - 4, half - 4);
+      g.fillStyle = 'rgba(255,235,200,0.05)'; g.fillRect(x + 2, y + 2, half - 4, 2);
+      g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x + 2, y + half - 4, half - 4, 2);
+      g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(x + half - 4, y + 2, 2, half - 4);
+    }
+    for (let i = 0; i < 360; i++) { const x = Math.floor(hash2(i, 11) * TILE), y = Math.floor(hash2(i, 29) * TILE); g.fillStyle = hash2(i, 47) > 0.5 ? 'rgba(255,240,210,0.05)' : 'rgba(0,0,0,0.22)'; g.fillRect(x, y, 1, 1); }
+    return c;
+  }
+  let floorTile = null, floorPattern = null;
+  function floorPatternFor(ctx) { if (!floorTile) floorTile = buildFloorTile(); if (!floorPattern) floorPattern = ctx.createPattern(floorTile, 'repeat'); return floorPattern; }
+
   let eyeSprite = null;
   function eyeGlow() {
     if (eyeSprite) return eyeSprite;
-    const S = 24, c = make(S, S), g = c.getContext('2d'), cx = S / 2, cy = S / 2;
+    const S = 24, c = canvasOf(S, S), g = c.getContext('2d'), cx = S / 2, cy = S / 2;
     const gr = g.createRadialGradient(cx, cy, 0, cx, cy, S / 2);
     gr.addColorStop(0, 'rgba(255,120,90,0.95)'); gr.addColorStop(0.5, 'rgba(255,70,50,0.4)'); gr.addColorStop(1, 'rgba(255,40,30,0)');
     g.fillStyle = gr; g.fillRect(0, 0, S, S);
     return (eyeSprite = c);
   }
 
-  function shade(hex, f) {
-    const n = parseInt(hex.slice(1), 16);
-    const r = Math.round(((n >> 16) & 255) * f), gg = Math.round(((n >> 8) & 255) * f), b = Math.round((n & 255) * f);
-    return `rgb(${r},${gg},${b})`;
-  }
-
-  return { floorPatternFor, enemySprite, classSprite, projSprite, eyeGlow, TILE };
+  return { classSprite, enemySprite, projSprite, eyeGlow, floorPatternFor };
 })();
 
 window.Art = Art;

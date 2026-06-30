@@ -16,6 +16,7 @@
     canvas.width = Math.floor(W * DPR); canvas.height = Math.floor(H * DPR);
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false; // crisp pixel-art scaling
   }
   window.addEventListener('resize', resize);
   resize();
@@ -465,6 +466,12 @@
     ctx.save(); ctx.translate(x, y); if (angle) ctx.rotate(angle); if (scale && scale !== 1) ctx.scale(scale, scale);
     ctx.drawImage(spr.canvas, -spr.cx, -spr.cy); ctx.restore();
   }
+  // Pixel-art draw: flip to face, subtle 2-frame idle bob, no rotation.
+  function drawSprite(spr, x, y, faceLeft, id) {
+    const bob = (Math.floor(elapsed * 5 + (id || 0)) % 2) ? -1.5 : 0;
+    ctx.save(); ctx.translate(x, y + bob); if (faceLeft) ctx.scale(-1, 1);
+    ctx.drawImage(spr.canvas, -spr.cx, -spr.cy); ctx.restore();
+  }
   function render() {
     torchFlicker = Math.sin(elapsed * 9) * 5 + Math.sin(elapsed * 23) * 3;
     const litR = Math.max(245, Math.min(W, H) * 0.6) + torchFlicker;
@@ -472,6 +479,7 @@
     const camX = player.x - W / 2 + sx, camY = player.y - H / 2 + sy;
 
     ctx.fillStyle = '#15130f'; ctx.fillRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = false;
     ctx.save(); ctx.translate(-camX, -camY);
 
     // Floor texture
@@ -495,7 +503,7 @@
     for (const e of enemies) {
       const d = Math.hypot(e.x - player.x, e.y - player.y);
       if (d > litR * 1.04) { darkEnemies.push(e); continue; }
-      blit(Art.enemySprite(e.type), e.x, e.y, e.facing);
+      drawSprite(Art.enemySprite(e.type), e.x, e.y, player.x < e.x, e._id);
       if (e.hitFlash > 0) { ctx.globalAlpha = e.hitFlash * 6; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; }
       if (e.elite) { ctx.strokeStyle = 'rgba(255,210,90,0.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 4, 0, TAU); ctx.stroke(); }
       if (e.telegraph) { ctx.strokeStyle = 'rgba(255,80,60,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6 + Math.sin(elapsed * 30) * 3, 0, TAU); ctx.stroke(); }
@@ -524,7 +532,7 @@
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
 
     // Player
-    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) blit(Art.classSprite(player.classId), player.x, player.y, player.facing);
+    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) drawSprite(Art.classSprite(player.classId), player.x, player.y, Math.cos(player.facing) < 0, 0);
 
     ctx.restore();
 
