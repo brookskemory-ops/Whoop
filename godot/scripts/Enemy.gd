@@ -63,8 +63,11 @@ func _physics_process(delta: float) -> void:
 		_hit_flash -= delta
 		queue_redraw()
 	if burn_until > main.elapsed and burn_dps > 0.0:
-		take_damage(burn_dps * delta, false)
+		# Burn ticks bypass take_damage()'s sfx/hit-flash (ported from the direct
+		# `e.hp -= e.burn.dps * dt` in js/game.js, not damageEnemy()).
+		hp -= burn_dps * delta
 		if hp <= 0.0:
+			_die()
 			return
 
 	var vel := Vector2.ZERO
@@ -138,10 +141,11 @@ func apply_burn(dps: float, seconds: float) -> void:
 	var main := get_tree().current_scene
 	if main: burn_dps = dps; burn_until = main.elapsed + seconds
 
-func take_damage(amount: float, _crit: bool = false) -> void:
+func take_damage(amount: float, crit: bool = false) -> void:
 	hp -= amount
 	_hit_flash = 0.1
 	queue_redraw()
+	GameAudio.sfx("crit" if crit else "hit")
 	if hp <= 0.0:
 		_die()
 
@@ -149,6 +153,7 @@ func _die() -> void:
 	var main := get_tree().current_scene
 	if main == null or not is_instance_valid(self):
 		return
+	GameAudio.sfx("enemyDie")
 	# Death effects (onEnemyDeath in js/enemies.js).
 	if kind == "exploder":
 		main.hurt_area(global_position, 64.0, dmg)

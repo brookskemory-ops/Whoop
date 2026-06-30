@@ -25,6 +25,7 @@ func _process(delta: float) -> void:
 		var main := get_tree().current_scene
 		if main and main.has_method("add_gold"):
 			main.add_gold(_gold * player.fortune_gold)
+		GameAudio.sfx("pickup")
 		queue_free()
 
 func _draw() -> void:

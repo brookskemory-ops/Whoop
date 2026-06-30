@@ -80,8 +80,32 @@ Runnable core slice, validated headlessly (`--selftest`):
   title → a fresh Begin, including a save-file round trip and cross-process
   gold accumulation. No script errors.
 
-### Phase 3b — Audio & lighting (remaining)
-- Audio (port `js/audio.js` to an AudioStreamPlayer bus / generated SFX).
+### Phase 3b — Audio (DONE)
+- `GameAudio.gd` (autoload): fully procedural, no audio files — ported from
+  `js/audio.js`'s WebAudio oscillator/noise synthesis. One-shot SFX (hit/crit/
+  enemyDie/pickup/levelup/hurt/cast/uiClick/purchase/heartbeat) are baked into
+  small in-memory 16-bit `AudioStreamWAV` buffers on demand (oscillator
+  waveform + exponential envelope ported from `tone()`; faded + one-pole-
+  high-passed white noise ported from `noise()`) and played from a pooled
+  `AudioStreamPlayer`s. Music is a 12s looping drone bed (3 detuned sine/
+  triangle tones with slow LFO gain wobble, ported from `drone()`) plus sparse
+  scheduled triangle motif notes on a `Timer` (ported from `schedule()`).
+- Wired at every JS call site: weapon/ability/movement-ability fire → `cast`;
+  `Enemy.take_damage()` → `hit`/`crit` (burn ticks correctly bypass this,
+  matching the JS's direct-hp-subtract burn path); enemy death → `enemyDie`;
+  player damage → `hurt`; gem pickup → `pickup`; level-up trigger → `levelup`
+  (boss spawn + revive also use `levelup`, matching `spawnBoss()`/
+  `revivePlayer()`); low-HP pulse → `heartbeat`; menu nav/picks → `uiClick`;
+  successful Armory purchases → `purchase`; music starts on `_begin_run`,
+  stops (+ a `levelup` sting on victory) in `_end_run`.
+- Validated headlessly: `--audiotest` bakes a tone+noise burst directly and
+  confirms the PCM is non-silent and within range, exercises every named
+  `sfx()` call through the real public API, and confirms the music drone
+  actually plays. `--selftest`/`--bosstest`/`--deathtest` still pass clean
+  with audio now firing throughout (no script errors, no audio-driver issues
+  running `--headless`).
+
+### Phase 3c — Lighting & pause (remaining)
 - Torch lighting (Light2D / CanvasModulate) + low-HP vignette + screen shake.
 - Pause screen + settings (volume/mute) — currently no in-run pause menu.
 
@@ -100,4 +124,4 @@ Runnable core slice, validated headlessly (`--selftest`):
 | `Art.floorPatternFor` | tiled `Sprite2D` in `Main._build_world` |
 | `localStorage` meta | `scripts/GameSave.gd` autoload + `user://` JSON (done) |
 | DOM screens | `CanvasLayer` + `Control`s built in `Main.gd` (done) |
-| `GameAudio` (WebAudio) | `AudioStreamPlayer` bus (Phase 3b) |
+| `js/audio.js` (WebAudio) | `scripts/GameAudio.gd` autoload + baked `AudioStreamWAV` (done) |

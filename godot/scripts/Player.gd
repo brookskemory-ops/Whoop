@@ -128,6 +128,7 @@ func _physics_process(delta: float) -> void:
 		_attack_timer -= delta
 		if _attack_timer <= 0.0:
 			Weapons.fire(weapon_id, self, main)
+			GameAudio.sfx("cast")
 			_attack_timer = attack_cooldown
 			_atk_t = 0.3
 
@@ -138,6 +139,7 @@ func _physics_process(delta: float) -> void:
 			s["timer"] -= delta
 			if s["timer"] <= 0.0:
 				Abilities.activate(def, self, main, s["rank"])
+				GameAudio.sfx("cast")
 				s["timer"] = Abilities.cooldown(def, s["rank"])
 				_atk_t = 0.3
 		elif s["timer"] > 0.0:
@@ -152,6 +154,7 @@ func use_movement_ability() -> void:
 		var def := Abilities.by_id(s["id"])
 		if Abilities.kind_of(def) == "movement" and s["timer"] <= 0.0:
 			Abilities.activate(def, self, main, s["rank"])
+			GameAudio.sfx("cast")
 			s["timer"] = Abilities.cooldown(def, s["rank"])
 			return
 
@@ -221,6 +224,7 @@ func take_damage(amount: float) -> void:
 	hp -= amount
 	invuln = 0.6
 	_hurt_t = 0.3
+	GameAudio.sfx("hurt")
 	if hp <= 0.0:
 		died.emit()
 

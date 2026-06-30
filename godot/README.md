@@ -18,6 +18,8 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
   - `godot --headless --path godot -- --deathtest` — lethal damage → death
     screen → GameSave persists (incl. a save-file round trip) → Continue →
     title → fresh run.
+  - `godot --headless --path godot -- --audiotest` — bakes + sanity-checks the
+    procedural SFX PCM and exercises every sfx()/the music drone.
 
 ## What's in the project so far
 - **Player** (`scripts/Player.gd`) — movement, 8-direction facing, the
@@ -44,6 +46,9 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
   choice), Armory (buy upgrades + unlocks), Achievements. A run starts via
   Class Select → Begin; the end screen's Continue returns to the title.
 - **Revive** — a bought Armory upgrade grants second-chance saves on death.
+- **Audio** (`scripts/GameAudio.gd`, autoload) — fully procedural SFX + ambient
+  music (no audio files), baked into in-memory `AudioStreamWAV`s, ported from
+  `js/audio.js`'s WebAudio oscillator/noise synthesis.
 - **Spawn director** — ramping spawn interval, paused during the final boss.
 - **Floor** — the PixelLab dungeon-stone tile, tiled across the world.
 - **Input** — touch joystick + WASD/arrows + a movement-ability button/Space.
@@ -52,8 +57,8 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
   achievements, upgrade tracks, and the animation manifest.
 
 ## Not yet ported (next phases) — see ../PORTING.md
-Enemy/boss sprite art, audio, a pause/settings screen, and torch lighting. The
-HTML5 build in the repo root remains the reference for all of these.
+Enemy/boss sprite art, a pause/settings screen, and torch lighting/screen
+shake. The HTML5 build in the repo root remains the reference for all of these.
 
 ## Asset note
 `assets/` here is a copy of the repo's `../assets/`. The Godot project is the

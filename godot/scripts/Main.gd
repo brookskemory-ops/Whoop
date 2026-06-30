@@ -29,6 +29,7 @@ var _final_spawned := false
 var _banner_text := ""
 var _banner_timer := 0.0
 var _end_ui: CanvasLayer
+var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 
 # HUD
 var _lbl_level: Label
@@ -73,6 +74,8 @@ func _ready() -> void:
 	elif _has_flag("--deathtest"):
 		_begin_run(DEFAULT_TEST_CLASS, "")
 		_run_deathtest()
+	elif _has_flag("--audiotest"):
+		_run_audiotest()
 	else:
 		_show_title()
 
@@ -113,7 +116,9 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
 	_boss = null; _next_mini = 0; _final_spawned = false
 	_banner_text = ""; _banner_timer = 0.0
+	_last_beat = 0.0
 	_state = "playing"
+	GameAudio.start_music()
 
 func _clear_run() -> void:
 	# Free everything spawned during the run (player/enemies/gems/projectiles),
@@ -155,13 +160,13 @@ func _show_title() -> void:
 	stats.text = "Best time: %d:%02d   Gold: %d" % [int(GameSave.best_time) / 60, int(GameSave.best_time) % 60, GameSave.gold]
 	vbox.add_child(stats)
 	var start_btn := Button.new(); start_btn.text = "Start Run"; start_btn.custom_minimum_size = Vector2(400, 56)
-	start_btn.pressed.connect(_show_class_select)
+	start_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_class_select())
 	vbox.add_child(start_btn)
 	var shop_btn := Button.new(); shop_btn.text = "Armory"; shop_btn.custom_minimum_size = Vector2(400, 48)
-	shop_btn.pressed.connect(_show_shop)
+	shop_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_shop())
 	vbox.add_child(shop_btn)
 	var ach_btn := Button.new(); ach_btn.text = "Achievements"; ach_btn.custom_minimum_size = Vector2(400, 48)
-	ach_btn.pressed.connect(_show_achievements)
+	ach_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_achievements())
 	vbox.add_child(ach_btn)
 
 func _show_class_select() -> void:
@@ -196,18 +201,20 @@ func _show_class_select() -> void:
 
 	var begin_btn := Button.new(); begin_btn.text = "Begin"; begin_btn.custom_minimum_size = Vector2(400, 56)
 	begin_btn.disabled = not (GameSave.class_unlocked(_selected_class) and GameSave.weapon_unlocked(_selected_weapon))
-	begin_btn.pressed.connect(_begin_run.bind(_selected_class, _selected_weapon))
+	begin_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _begin_run(_selected_class, _selected_weapon))
 	vbox.add_child(begin_btn)
 	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 44)
-	back_btn.pressed.connect(_show_title)
+	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
 
 func _pick_class(cid: String) -> void:
+	GameAudio.sfx("uiClick")
 	_selected_class = cid
 	_selected_weapon = GameData.CLASSES[cid]["weapon"]
 	_show_class_select()
 
 func _pick_weapon(wid: String) -> void:
+	GameAudio.sfx("uiClick")
 	_selected_weapon = wid
 	_show_class_select()
 
@@ -245,7 +252,7 @@ func _show_shop() -> void:
 			_shop_unlock_row(vbox, w["name"], int(w["unlock"]["cost"]), _buy_weapon_unlock.bind(wid, int(w["unlock"]["cost"])))
 
 	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
-	back_btn.pressed.connect(_show_title)
+	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
 
 func _shop_unlock_row(vbox: VBoxContainer, label: String, cost: int, handler: Callable) -> void:
@@ -262,6 +269,7 @@ func _buy_upgrade(id: String) -> void:
 	if GameSave.gold >= cost:
 		GameSave.gold -= cost
 		GameSave.upgrades[id] = lvl + 1
+		GameAudio.sfx("purchase")
 		GameSave.save_data()
 		_show_shop()
 
@@ -269,6 +277,7 @@ func _buy_class_unlock(cid: String, cost: int) -> void:
 	if GameSave.gold >= cost:
 		GameSave.gold -= cost
 		GameSave.unlocked_classes[cid] = true
+		GameAudio.sfx("purchase")
 		GameSave.save_data()
 		_show_shop()
 
@@ -276,6 +285,7 @@ func _buy_weapon_unlock(wid: String, cost: int) -> void:
 	if GameSave.gold >= cost:
 		GameSave.gold -= cost
 		GameSave.unlocked_weapons[wid] = true
+		GameAudio.sfx("purchase")
 		GameSave.save_data()
 		_show_shop()
 
@@ -288,10 +298,11 @@ func _show_achievements() -> void:
 		row.text = "%s %s\n%s\nUnlocks: %s" % [("✓" if done else "—"), a["name"], a["desc"], a["unlocks"]]
 		vbox.add_child(row)
 	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
-	back_btn.pressed.connect(_show_title)
+	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
 
 func _return_to_title() -> void:
+	GameAudio.sfx("uiClick")
 	if _end_ui:
 		_end_ui.queue_free(); _end_ui = null
 	get_tree().paused = false
@@ -333,6 +344,11 @@ func _process(delta: float) -> void:
 	if _banner_timer > 0.0:
 		_banner_timer -= delta
 
+	# Low-HP heartbeat pulse (ported from js/game.js).
+	if _player.hp / _player.max_hp < 0.3 and elapsed - _last_beat > 0.65:
+		_last_beat = elapsed
+		GameAudio.sfx("heartbeat")
+
 	_update_hud()
 
 func spawn_boss(key: String) -> void:
@@ -340,6 +356,7 @@ func spawn_boss(key: String) -> void:
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.55 + 60.0
 	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
 	_boss = add_enemy(key, pos, 1.0 + (elapsed / 60.0) * 0.06)
+	GameAudio.sfx("levelup")
 	_show_banner("The Warden Awakens" if key == "finalboss" else "A Champion Approaches")
 
 func _show_banner(text: String) -> void:
@@ -436,7 +453,7 @@ func _trigger_victory() -> void:
 	if _state != "playing":
 		return
 	_state = "won"
-	_end_run("Victory!")
+	_end_run("Victory!", true)
 
 # ── Level-up: pick an ability (ported from openLevelUp in js/game.js) ──────────
 func _on_level_up() -> void:
@@ -446,6 +463,7 @@ func _on_level_up() -> void:
 
 func _open_level_up() -> void:
 	while _pending_levels > 0:
+		GameAudio.sfx("levelup")
 		var opts := Abilities.roll(_player.cls_id, _player.owned_ranks(), 5)
 		if opts.is_empty():
 			_player.hp = min(_player.max_hp, _player.hp + 30.0)
@@ -487,6 +505,7 @@ func _build_level_cards(opts: Array) -> void:
 		vbox.add_child(b)
 
 func _pick_ability(opt: Dictionary) -> void:
+	GameAudio.sfx("uiClick")
 	_player.apply_pick(opt)
 	if _level_ui: _level_ui.queue_free(); _level_ui = null
 	_pending_levels -= 1
@@ -587,6 +606,7 @@ func _try_revive() -> bool:
 	_player.revives -= 1
 	_player.hp = roundf(_player.max_hp * 0.5)
 	_player.invuln = 2.5
+	GameAudio.sfx("levelup")
 	_show_banner("Second Wind!")
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var off: Vector2 = e.global_position - _player.global_position
@@ -600,8 +620,11 @@ func _try_revive() -> bool:
 
 # Persists run results to GameSave (ported from the shared tail of die()/
 # victory() in js/game.js) and shows the death/victory screen.
-func _end_run(title: String) -> void:
+func _end_run(title: String, won: bool = false) -> void:
 	get_tree().paused = true
+	GameAudio.stop_music()
+	if won:
+		GameAudio.sfx("levelup")
 	var fresh := _check_run_achievements()
 	GameSave.gold += int(floor(run_gold))
 	GameSave.total_kills += run_kills
@@ -733,4 +756,30 @@ func _run_deathtest() -> void:
 	var restart_ok := _state == "playing" and _player != null and is_instance_valid(_player) and _player.hp == _player.max_hp
 	print("[DEATHTEST] dead_ok=%s saved_ok=%s reload_ok=%s title_ok=%s restart_ok=%s gold=%d" % [
 		str(dead_ok), str(saved_ok), str(reload_ok), str(title_ok), str(restart_ok), GameSave.gold])
+	get_tree().quit(0)
+
+# Sanity-checks the procedural audio synthesis: bakes a tone + noise burst
+# directly and confirms the PCM isn't silent/clipped, then exercises every
+# named sfx() + the music drone/motif bake through the real public API.
+func _run_audiotest() -> void:
+	var sr := GameAudio.MIX_RATE
+	var samples := PackedFloat32Array(); samples.resize(int(0.4 * sr))
+	GameAudio._add_tone(samples, sr, 440.0, 0.0, 0.05, "square", 0.08)
+	GameAudio._add_noise(samples, sr, 0.1, 0.05, 0.18, 1200.0)
+	var peak := 0.0
+	var sumsq := 0.0
+	for v in samples:
+		peak = maxf(peak, absf(v))
+		sumsq += v * v
+	var rms := sqrt(sumsq / samples.size())
+
+	for name in ["hit", "crit", "enemyDie", "pickup", "levelup", "hurt", "cast", "uiClick", "purchase", "heartbeat"]:
+		GameAudio.sfx(name)
+	GameAudio.start_music()
+	await get_tree().create_timer(0.3).timeout
+	var drone_ok := GameAudio._music_player.stream != null and GameAudio._music_player.playing
+	GameAudio.stop_music()
+
+	print("[AUDIOTEST] peak=%.4f rms=%.6f nonsilent=%s in_range=%s drone_ok=%s" % [
+		peak, rms, str(peak > 0.001), str(peak <= 1.0), str(drone_ok)])
 	get_tree().quit(0)
