@@ -268,6 +268,18 @@ const Art = (() => {
   }
   let floorTile = null, floorPattern = null;
   function floorPatternFor(ctx) { if (!floorTile) floorTile = buildFloorTile(); if (!floorPattern) floorPattern = ctx.createPattern(floorTile, 'repeat'); return floorPattern; }
+  // Optional external floor tile (PixelLab top-down tileset). Seamless fill tile
+  // upscaled with nearest-neighbour; falls back to the coded stone if absent.
+  function loadFloorArt() {
+    const SCALE = 2;
+    const img = new Image();
+    img.onload = () => {
+      const n = img.width * SCALE, c = canvasOf(n, n), g = c.getContext('2d');
+      g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, img.width, img.height, 0, 0, n, n);
+      floorTile = c; floorPattern = null;   // rebuilt on next floorPatternFor()
+    };
+    img.src = 'assets/map/floor.png';
+  }
 
   let eyeSprite = null;
   function eyeGlow() {
@@ -363,6 +375,7 @@ const Art = (() => {
 
   preloadAssets();      // single-file overrides (static fallback)
   loadCharacterArt();   // 8-dir rotations + animations
+  loadFloorArt();       // external top-down floor tile (optional)
 
   return { classSprite, enemySprite, projSprite, eyeGlow, floorPatternFor, dirSprite, anim, animMeta };
 })();
