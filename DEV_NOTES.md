@@ -32,7 +32,9 @@ Characters can use external pixel-art (PixelLab) over the coded fallbacks:
 
 ### Status of art
 - All 5 uploaded classes (knight/archer/mage/rogue/cleric) have 8-dir **static rotations**.
-- **Knight** has animations but **south-east only** (other dirs show static rotation; SW mirrors SE).
+- All 5 classes now have full **8-direction frame animations** for every state
+  (idle/walk/attack/special/dash/hurt/death). Base dirs south/north/east/north-east/
+  south-east are baked; west/north-west/south-west mirror them at runtime.
 - Barbarian + all enemies/bosses still use coded sprites.
 
 ## PixelLab MCP (when available)
@@ -49,6 +51,6 @@ chat history / the plan file.
 ## Roadmap (see /root/.claude/plans/swift-wishing-cat.md if present)
 DONE: run structure + bosses + new enemies (timed 10-min victory, mini-bosses, final boss "Warden");
 permanent meta-upgrade shop (Vigor/Might/Haste/Fortune + buyable Revive); 16×16 coded pixel art;
-external sprite loader; 8-dir characters + Knight SE animations.
+external sprite loader; 8-dir characters; **8-dir animations for all 5 player classes**.
 PENDING **Phase 3**: balance tuning; first-run tooltips + How-to-Play; installable PWA
-(manifest + icons + service worker). Also: 8-dir animations for all classes, enemy/boss sprites.
+(manifest + icons + service worker). Also: barbarian + enemy/boss sprites & animations.
