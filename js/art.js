@@ -203,6 +203,48 @@ const Art = (() => {
     return (projCache[key] = pixel(projPaint(shape || 'orb', color), 9, disp));
   }
 
+  // ── External sprite assets (e.g. PixelLab.ai PNGs) ─────────────────────────
+  // Drop PNGs in assets/sprites/ and list their filenames in
+  // assets/sprites/manifest.json. Matching keys override the coded sprites;
+  // anything missing keeps its hand-authored fallback. (Square, transparent,
+  // right-facing PNGs work best — the renderer flips + bobs them.)
+  const PLAYER_KEYS = ['knight', 'archer', 'mage', 'rogue', 'cleric', 'barbarian'];
+  const ENEMY_KEYS = ['skeleton', 'goblin', 'ogre', 'shooter', 'exploder', 'splitter', 'charger', 'miniboss', 'finalboss'];
+  const ASSET_KEYS = new Set([...PLAYER_KEYS, ...ENEMY_KEYS]);
+  function bakeImage(img, disp) {
+    // Trim transparent margins so any source padding (e.g. PixelLab's 96px canvas)
+    // doesn't shrink the on-screen sprite; then fit the character into `disp`.
+    const t = canvasOf(img.width, img.height), tg = t.getContext('2d');
+    tg.drawImage(img, 0, 0);
+    let minx = img.width, miny = img.height, maxx = 0, maxy = 0, found = false;
+    try {
+      const d = tg.getImageData(0, 0, img.width, img.height).data;
+      for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) {
+        if (d[(y * img.width + x) * 4 + 3] > 24) { found = true; if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
+      }
+    } catch { found = false; }
+    if (!found) { minx = 0; miny = 0; maxx = img.width - 1; maxy = img.height - 1; }
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    const out = canvasOf(disp, disp), g = out.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    const scale = (disp * 0.96) / Math.max(bw, bh);
+    const dw = Math.round(bw * scale), dh = Math.round(bh * scale);
+    g.drawImage(t, minx, miny, bw, bh, Math.round((disp - dw) / 2), Math.round((disp - dh) / 2), dw, dh);
+    return { canvas: out, cx: disp / 2, cy: disp / 2 };
+  }
+  function setSprite(key, spr) { (PLAYER_KEYS.indexOf(key) >= 0 ? classCache : enemyCache)[key] = spr; }
+  async function preloadAssets() {
+    let list = [];
+    try { const r = await fetch('assets/sprites/manifest.json', { cache: 'no-cache' }); if (r.ok) list = await r.json(); } catch {}
+    for (const file of list) {
+      const key = String(file).replace(/\.png$/i, '');
+      if (!ASSET_KEYS.has(key)) continue;
+      const img = new Image();
+      img.onload = () => setSprite(key, bakeImage(img, Math.round((DISP[key] || 36) * 1.35)));
+      img.src = 'assets/sprites/' + file;
+    }
+  }
+
   // ── Stone floor (unchanged) ────────────────────────────────────────────────
   const TILE = 128;
   function buildFloorTile() {
@@ -231,6 +273,8 @@ const Art = (() => {
     g.fillStyle = gr; g.fillRect(0, 0, S, S);
     return (eyeSprite = c);
   }
+
+  preloadAssets(); // pull in any assets/sprites/*.png overrides
 
   return { classSprite, enemySprite, projSprite, eyeGlow, floorPatternFor };
 })();
