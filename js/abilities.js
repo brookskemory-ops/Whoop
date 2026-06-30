@@ -15,7 +15,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // ── Reusable mechanics (parameterised so many abilities share rendering/logic) ──
 function novaSkill(o) {
   return {
-    id: o.id, name: o.name, classId: o.classId, kind: 'attack', icon: o.icon || '✸', maxRank: o.maxRank,
+    id: o.id, name: o.name, classId: o.classId, kind: 'attack', pose: 'special', icon: o.icon || '✸', maxRank: o.maxRank,
     cooldown: (r) => Math.max(o.cdMin || 1, o.cd - (o.cdStep || 0) * (r - 1)),
     desc: (r) => `${o.flavor} — ${Math.round((o.dmg + (o.dmgStep || 0) * (r - 1)) * 100)}% dmg, ${Math.round(o.rad + (o.radStep || 0) * (r - 1))} radius`,
     activate(ctx, r) {
@@ -28,7 +28,7 @@ function novaSkill(o) {
 }
 function slamSkill(o) { // targeted AoE on the nearest enemy cluster
   return {
-    id: o.id, name: o.name, classId: o.classId, kind: 'attack', icon: o.icon || '☄', maxRank: o.maxRank,
+    id: o.id, name: o.name, classId: o.classId, kind: 'attack', pose: 'special', icon: o.icon || '☄', maxRank: o.maxRank,
     cooldown: (r) => Math.max(o.cdMin || 1, o.cd - (o.cdStep || 0) * (r - 1)),
     desc: (r) => `${o.flavor} — ${Math.round((o.dmg + (o.dmgStep || 0) * (r - 1)) * 100)}% dmg, ${Math.round(o.rad + (o.radStep || 0) * (r - 1))} radius`,
     activate(ctx, r) {

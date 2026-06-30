@@ -279,9 +279,92 @@ const Art = (() => {
     return (eyeSprite = c);
   }
 
-  preloadAssets(); // pull in any assets/sprites/*.png overrides
+  // ── 8-directional rotations + frame animations ─────────────────────────────
+  const DIRS_ALL = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
+  const MIRROR = { east: 'west', west: 'east', 'north-east': 'north-west', 'north-west': 'north-east', 'south-east': 'south-west', 'south-west': 'south-east' };
+  const ANIM_DEFAULTS = { idle: { fps: 6, loop: true }, walk: { fps: 10, loop: true }, attack: { fps: 16, loop: false }, special: { fps: 13, loop: false }, dash: { fps: 18, loop: false }, hurt: { fps: 16, loop: false }, death: { fps: 10, loop: false } };
+  const dirCache = {};   // cls -> dir -> {canvas,cx,cy}
+  const animCache = {};  // cls -> state -> { byDir: { dir: [ {canvas,cx,cy} ] } }
+  const ANIM_META = {};  // cls -> state -> { fps, loop, n }
 
-  return { classSprite, enemySprite, projSprite, eyeGlow, floorPatternFor };
+  function unionBbox(imgs) {
+    const w = imgs[0].width, h = imgs[0].height, t = canvasOf(w, h), tg = t.getContext('2d');
+    let minx = 1e9, miny = 1e9, maxx = -1, maxy = -1;
+    for (const im of imgs) {
+      tg.clearRect(0, 0, w, h); tg.drawImage(im, 0, 0);
+      const d = tg.getImageData(0, 0, w, h).data;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 24) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
+    }
+    if (maxx < 0) { minx = 0; miny = 0; maxx = w - 1; maxy = h - 1; }
+    return { minx, miny, maxx, maxy };
+  }
+  function bakeCropped(im, box, disp) {
+    const bw = box.maxx - box.minx + 1, bh = box.maxy - box.miny + 1;
+    const out = canvasOf(disp, disp), g = out.getContext('2d'); g.imageSmoothingEnabled = false;
+    const scale = (disp * 0.96) / Math.max(bw, bh), dw = Math.round(bw * scale), dh = Math.round(bh * scale);
+    g.drawImage(im, box.minx, box.miny, bw, bh, Math.round((disp - dw) / 2), Math.round((disp - dh) / 2), dw, dh);
+    return { canvas: out, cx: disp / 2, cy: disp / 2 };
+  }
+
+  function loadClass(cls, animDef) {
+    const rotUrls = {}; const urls = [];
+    for (const d of DIRS_ALL) { rotUrls[d] = `assets/sprites/${cls}/${d}.png`; urls.push(rotUrls[d]); }
+    const animUrls = {};
+    if (animDef && animDef.states) {
+      const dirs = animDef.dirs || ['south-east'];
+      for (const st of Object.keys(animDef.states)) {
+        const n = animDef.states[st]; animUrls[st] = {};
+        for (const d of dirs) { const arr = []; for (let i = 0; i < n; i++) { const u = `assets/anim/${cls}/${st}/${d}/frame_${String(i).padStart(3, '0')}.png`; arr.push(u); urls.push(u); } animUrls[st][d] = arr; }
+        const def = ANIM_DEFAULTS[st] || { fps: 10, loop: false };
+        (ANIM_META[cls] = ANIM_META[cls] || {})[st] = { fps: def.fps, loop: def.loop, n };
+      }
+    }
+    const imgs = {}; let pending = urls.length; if (!pending) return;
+    const done = (u, im) => { if (im) imgs[u] = im; if (--pending === 0) finalize(); };
+    urls.forEach((u) => { const im = new Image(); im.onload = () => done(u, im); im.onerror = () => done(u, null); im.src = u; });
+    function finalize() {
+      const list = Object.values(imgs); if (!list.length) return;
+      const box = unionBbox(list), disp = assetDisp(cls);
+      dirCache[cls] = {};
+      for (const d of DIRS_ALL) if (imgs[rotUrls[d]]) dirCache[cls][d] = bakeCropped(imgs[rotUrls[d]], box, disp);
+      if (animDef && animDef.states) {
+        animCache[cls] = {};
+        for (const st of Object.keys(animUrls)) {
+          animCache[cls][st] = { byDir: {} };
+          for (const d of Object.keys(animUrls[st])) {
+            const frames = animUrls[st][d].map((u) => imgs[u]).filter(Boolean).map((im) => bakeCropped(im, box, disp));
+            if (frames.length) animCache[cls][st].byDir[d] = frames;
+          }
+        }
+      }
+    }
+  }
+  async function loadCharacterArt() {
+    let rot = [], anim = {};
+    try { const r = await fetch('assets/sprites/rotations.json', { cache: 'no-cache' }); if (r.ok) rot = await r.json(); } catch {}
+    try { const r = await fetch('assets/anim/manifest.json', { cache: 'no-cache' }); if (r.ok) anim = await r.json(); } catch {}
+    for (const cls of rot) loadClass(cls, anim[cls]);
+  }
+
+  function dirSprite(cls, dir) {
+    const c = dirCache[cls]; if (!c) return null;
+    if (c[dir]) return { canvas: c[dir].canvas, cx: c[dir].cx, cy: c[dir].cy, flip: false };
+    const m = MIRROR[dir]; if (m && c[m]) return { canvas: c[m].canvas, cx: c[m].cx, cy: c[m].cy, flip: true };
+    return null;
+  }
+  function anim(cls, state, dir) {
+    const c = animCache[cls] && animCache[cls][state]; if (!c) return null;
+    const meta = ANIM_META[cls][state];
+    if (c.byDir[dir]) return { frames: c.byDir[dir], fps: meta.fps, loop: meta.loop, flip: false };
+    const m = MIRROR[dir]; if (m && c.byDir[m]) return { frames: c.byDir[m], fps: meta.fps, loop: meta.loop, flip: true };
+    return null;
+  }
+  function animMeta(cls, state) { return (ANIM_META[cls] && ANIM_META[cls][state]) || null; }
+
+  preloadAssets();      // single-file overrides (static fallback)
+  loadCharacterArt();   // 8-dir rotations + animations
+
+  return { classSprite, enemySprite, projSprite, eyeGlow, floorPatternFor, dirSprite, anim, animMeta };
 })();
 
 window.Art = Art;

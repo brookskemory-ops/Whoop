@@ -92,6 +92,7 @@
     const p = Object.assign({}, DEFAULTS, cls.baseStats);
     p.x = 0; p.y = 0; p.classId = classId; p.weaponId = weaponId;
     p.skills = []; p.orbitGroups = []; p.dash = null; p.attackTimer = 0;
+    p.animState = 'idle'; p.animFrame = 0; p.animT = 0; p.atkT = 0; p.atkPose = 'attack'; p.hurtT = 0; p.moving = false;
     // Apply permanent upgrades.
     const u = meta.upgrades;
     p.maxHp += u.vigor * 20;
@@ -217,7 +218,7 @@
   // Player damage from any source (contact, enemy projectiles, explosions).
   function applyPlayerDamage(amt) {
     if (player.invuln > 0) return;
-    player.hp -= amt; player.invuln = 0.6; addShake(7); SFX.sfx('hurt');
+    player.hp -= amt; player.invuln = 0.6; player.hurtT = 0.3; addShake(7); SFX.sfx('hurt');
     particles.push(...burst(player.x, player.y, '#ff5555', 8));
     if (player.hp <= 0) die();
   }
@@ -336,8 +337,10 @@
       effects.push({ type: 'fade', x: player.x, y: player.y, r: player.r, life: 0.18, maxLife: 0.18, color: d.color });
       if (d.hitMult) for (const e of enemies) { if (e.hp <= 0 || d.hits.has(e._id)) continue; if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (player.r + e.r + 6) ** 2) { d.hits.add(e._id); damageEnemy(e, player.damage * d.hitMult, false); applyEnemyEffects(e); } }
       if (d.time <= 0) player.dash = null;
+      player.moving = true;
     } else {
       const md = moveDir();
+      player.moving = !!(md.x || md.y);
       player.x += md.x * player.speed * dt; player.y += md.y * player.speed * dt;
     }
     // Facing: aim at nearest foe, else move direction
@@ -355,13 +358,13 @@
     const w = WEAPON_BY_ID[player.weaponId];
     if (w.fire && w.type !== 'orbital') {
       player.attackTimer -= dt;
-      if (player.attackTimer <= 0) { w.fire(c); SFX.sfx('cast'); player.attackTimer = player.attackCooldown; }
+      if (player.attackTimer <= 0) { w.fire(c); SFX.sfx('cast'); player.attackTimer = player.attackCooldown; player.atkT = 0.3; player.atkPose = 'attack'; }
     }
 
     // Active abilities
     for (const s of player.skills) {
       const def = ABILITIES_BY_ID[s.id];
-      if (def.kind === 'attack') { s.timer -= dt; if (s.timer <= 0) { def.activate(c, s.rank); SFX.sfx('cast'); s.timer = def.cooldown(s.rank); } }
+      if (def.kind === 'attack') { s.timer -= dt; if (s.timer <= 0) { def.activate(c, s.rank); SFX.sfx('cast'); s.timer = def.cooldown(s.rank); player.atkPose = def.pose === 'special' ? 'special' : 'attack'; player.atkT = def.pose === 'special' ? 0.5 : 0.3; } }
       else if (def.kind === 'movement') { if (s.timer > 0) s.timer -= dt; }
     }
 
@@ -448,6 +451,8 @@
     effects = effects.filter((e) => e.life > 0);
     floaters = floaters.filter((f) => f.life > 0);
 
+    updatePlayerAnim(dt);
+
     el('level-text').textContent = `Lv ${player.level}`;
     el('timer').textContent = fmtTime(elapsed);
     el('hp-bar').style.width = `${Math.max(0, (player.hp / player.maxHp) * 100)}%`;
@@ -471,6 +476,27 @@
     const bob = (Math.floor(elapsed * 5 + (id || 0)) % 2) ? -1.5 : 0;
     ctx.save(); ctx.translate(x, y + bob); if (faceLeft) ctx.scale(-1, 1);
     ctx.drawImage(spr.canvas, -spr.cx, -spr.cy); ctx.restore();
+  }
+  // 8-way directional draw (rotations / animation frames — no bob, no rotation).
+  const DIR8 = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+  function dirOf(a) { let i = Math.round(a / (Math.PI / 4)); i = ((i % 8) + 8) % 8; return DIR8[i]; }
+  function drawDir(spr, x, y, flip) {
+    ctx.save(); ctx.translate(x, y); if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(spr.canvas, -spr.cx, -spr.cy); ctx.restore();
+  }
+  function updatePlayerAnim(dt) {
+    if (player.atkT > 0) player.atkT -= dt;
+    if (player.hurtT > 0) player.hurtT -= dt;
+    let st;
+    if (player.dash) st = 'dash';
+    else if (player.atkT > 0) st = player.atkPose;
+    else if (player.hurtT > 0) st = 'hurt';
+    else if (player.moving) st = 'walk';
+    else st = 'idle';
+    if (st !== player.animState) { player.animState = st; player.animFrame = 0; player.animT = 0; }
+    const meta = Art.animMeta(player.classId, st);
+    if (meta) { player.animT += dt; const fd = 1 / meta.fps; while (player.animT >= fd) { player.animT -= fd; player.animFrame++; if (player.animFrame >= meta.n) player.animFrame = meta.loop ? 0 : meta.n - 1; } }
+    else player.animFrame = 0;
   }
   function render() {
     torchFlicker = Math.sin(elapsed * 9) * 5 + Math.sin(elapsed * 23) * 3;
@@ -532,7 +558,12 @@
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
 
     // Player
-    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) drawSprite(Art.classSprite(player.classId), player.x, player.y, Math.cos(player.facing) < 0, 0);
+    if (!(player.invuln > 0 && Math.floor(elapsed * 20) % 2)) {
+      const dir = dirOf(player.facing);
+      const a = Art.anim(player.classId, player.animState, dir);
+      if (a) drawDir(a.frames[Math.min(player.animFrame, a.frames.length - 1)], player.x, player.y, a.flip);
+      else { const ds = Art.dirSprite(player.classId, dir); if (ds) drawDir(ds, player.x, player.y, ds.flip); else drawSprite(Art.classSprite(player.classId), player.x, player.y, Math.cos(player.facing) < 0, 0); }
+    }
 
     ctx.restore();
 
