@@ -25,6 +25,11 @@ var aoe_mult := 1.0
 var crit_mult := 2.0
 var proj_count := 1
 
+# Permanent meta-upgrades (applied in setup() from GameSave.upgrades).
+var revives := 0
+var fortune_gold := 1.0
+var fortune_xp := 1.0
+
 var weapon_id := "arming_sword"
 var weapon_type := "melee"
 var orbit_groups: Array = []
@@ -52,16 +57,26 @@ var _tex_cache := {}
 
 @onready var _spr := Sprite2D.new()
 
-func setup(id: String) -> void:
+func setup(id: String, chosen_weapon_id: String = "") -> void:
 	cls_id = id
 	var c: Dictionary = GameData.CLASSES[id]
-	max_hp = c["max_hp"]; hp = max_hp
+	max_hp = c["max_hp"]
 	move_speed = c["speed"]; damage = c["damage"]; crit = c["crit"]; regen = c["regen"]
-	weapon_id = c["weapon"]
+	weapon_id = chosen_weapon_id if chosen_weapon_id != "" else c["weapon"]
 	var wm: Dictionary = GameData.WEAPON_META[weapon_id]
 	weapon_type = wm["type"]
 	attack_cooldown = wm["cooldown"]
 	_has_anim = GameData.ANIMATED_CLASSES.has(id)
+
+	# Apply permanent upgrades bought in the Armory (ported from createPlayer).
+	var u: Dictionary = GameSave.upgrades
+	max_hp += float(u.get("vigor", 0)) * 20.0
+	damage *= 1.0 + float(u.get("might", 0)) * 0.08
+	move_speed *= 1.0 + float(u.get("haste", 0)) * 0.05
+	fortune_gold = 1.0 + float(u.get("fortune", 0)) * 0.10
+	fortune_xp = 1.0 + float(u.get("fortune", 0)) * 0.08
+	revives = int(u.get("revive", 0))
+	hp = max_hp
 
 func _ready() -> void:
 	add_to_group("player")

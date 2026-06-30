@@ -53,12 +53,37 @@ Runnable core slice, validated headlessly (`--selftest`):
   state to "won"); `--deathtest` verifies lethal damage pauses with the death
   screen and Restart returns to a fresh full-HP run. No script errors.
 
-### Phase 3 — Meta & UX
-- Title / class-select / shop (Armory upgrades) / achievements / pause /
-  settings screens (port `js/achievements.js` + the meta logic in `js/game.js`).
-- Save system (Godot `user://` JSON, replacing `localStorage`).
+### Phase 3a — Meta-progression, save & menus (DONE)
+- `GameSave.gd` (autoload): persistent gold/best-time/unlocks/achievements/
+  total+per-class kills/upgrade levels, JSON round-tripped through Godot's
+  `user://` directory — replaces `localStorage`/`loadMeta`/`saveMeta`. Verified
+  to survive both an in-process reload and a real separate process launch.
+- `js/achievements.js` → `GameData.ACHIEVEMENTS` + `check_achievements()`; run
+  end (death or victory) checks and applies fresh unlocks, shown on the end
+  screen, exactly mirroring `checkRunAchievements()`/`applyUnlock()`.
+- Permanent Armory upgrades (`UPGRADE_TRACKS`: Vigor/Might/Haste/Fortune/
+  Revive) ported to `GameData` + applied in `Player.setup()`, matching
+  `createPlayer()`'s upgrade math; Fortune's gold/XP multipliers applied on
+  gem pickup.
+- Second-chance **Revive** (ported from `revivePlayer()`): consumes a charge,
+  heals to 50%, knocks back + damages the surrounding swarm.
+- Menus built in `Main.gd` (CanvasLayer + Controls, matching the level-up/end
+  -screen pattern): **Title** (best time/gold, Start Run/Armory/Achievements),
+  **Class select** (locked/unlocked classes + per-class weapon choice, ported
+  from `buildClassSelect`), **Armory/Shop** (buy upgrades + gold-gated class/
+  weapon unlocks, ported from `buildShop`), **Achievements** list. A run now
+  starts from class-select (`Begin`) instead of auto-starting; the end screen's
+  Continue returns to the title screen rather than instantly restarting,
+  matching the JS screen flow.
+- Validated headlessly: `--selftest`/`--bosstest` unchanged; `--deathtest`
+  extended to verify GameSave persists through death → end screen → Continue →
+  title → a fresh Begin, including a save-file round trip and cross-process
+  gold accumulation. No script errors.
+
+### Phase 3b — Audio & lighting (remaining)
 - Audio (port `js/audio.js` to an AudioStreamPlayer bus / generated SFX).
 - Torch lighting (Light2D / CanvasModulate) + low-HP vignette + screen shake.
+- Pause screen + settings (volume/mute) — currently no in-run pause menu.
 
 ### Phase 4 — Art & ship
 - Enemy/boss sprite art (PixelLab) replacing the placeholder shapes.
@@ -73,6 +98,6 @@ Runnable core slice, validated headlessly (`--selftest`):
 | `js/game.js` loop/update | `scripts/Main.gd` + node `_process` |
 | `updatePlayerAnim` / `dirOf` | `scripts/Player.gd` + `GameData.dir_of` |
 | `Art.floorPatternFor` | tiled `Sprite2D` in `Main._build_world` |
-| `localStorage` meta | `user://save.json` (Phase 3) |
-| DOM screens | `CanvasLayer` + `Control` scenes (Phase 3) |
-| `GameAudio` (WebAudio) | `AudioStreamPlayer` bus (Phase 3) |
+| `localStorage` meta | `scripts/GameSave.gd` autoload + `user://` JSON (done) |
+| DOM screens | `CanvasLayer` + `Control`s built in `Main.gd` (done) |
+| `GameAudio` (WebAudio) | `AudioStreamPlayer` bus (Phase 3b) |

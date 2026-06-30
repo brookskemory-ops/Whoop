@@ -21,10 +21,10 @@ func _process(delta: float) -> void:
 	if d < PICKUP_RANGE:
 		global_position += to.normalized() * 340.0 * delta
 	if d < player.radius() + radius:
-		player.gain_xp(_xp)
+		player.gain_xp(_xp * player.fortune_xp)
 		var main := get_tree().current_scene
 		if main and main.has_method("add_gold"):
-			main.add_gold(_gold)
+			main.add_gold(_gold * player.fortune_gold)
 		queue_free()
 
 func _draw() -> void:

@@ -1,9 +1,13 @@
 extends Node2D
-## Run controller: builds the world (floor, player, camera), drives spawning,
-## input (touch joystick + keyboard) and the HUD. Foundation slice ported from
-## js/game.js — menus, abilities, bosses and meta-progression come in later phases.
+## Run controller: menus (title/class-select/shop/achievements), the world
+## (floor, player, camera), spawning, input, the HUD, and meta-progression —
+## ported from js/game.js. Audio + lighting are not yet ported.
 
-const SELECTED_CLASS := "knight"
+const DEFAULT_TEST_CLASS := "knight"
+
+var _selected_class := "knight"
+var _selected_weapon := "arming_sword"
+var _menu_ui: CanvasLayer
 
 var _win_time := 600.0
 var _mini_times := [180.0, 360.0, 540.0]
@@ -60,13 +64,17 @@ func _ready() -> void:
 		_mini_times = [3.0, 6.0, 9.0]
 	_build_world()
 	_build_hud()
-	_start_run()
 	if _has_flag("--selftest"):
+		_begin_run(DEFAULT_TEST_CLASS, "")
 		_run_selftest()
 	elif _has_flag("--bosstest"):
+		_begin_run(DEFAULT_TEST_CLASS, "")
 		_run_bosstest()
 	elif _has_flag("--deathtest"):
+		_begin_run(DEFAULT_TEST_CLASS, "")
 		_run_deathtest()
+	else:
+		_show_title()
 
 func _has_flag(name: String) -> bool:
 	return name in OS.get_cmdline_args() or name in OS.get_cmdline_user_args()
@@ -86,9 +94,12 @@ func _build_world() -> void:
 	floor_spr.z_index = -100
 	_world.add_child(floor_spr)
 
-func _start_run() -> void:
+func _begin_run(class_id: String, weapon_id: String) -> void:
+	_clear_menu()
+	_clear_run()
+
 	_player = Player.new()
-	_player.setup(SELECTED_CLASS)
+	_player.setup(class_id, weapon_id)
 	_player.died.connect(_on_player_died)
 	_player.leveled_up.connect(_on_level_up)
 	_world.add_child(_player)
@@ -103,6 +114,189 @@ func _start_run() -> void:
 	_boss = null; _next_mini = 0; _final_spawned = false
 	_banner_text = ""; _banner_timer = 0.0
 	_state = "playing"
+
+func _clear_run() -> void:
+	# Free everything spawned during the run (player/enemies/gems/projectiles),
+	# but leave the floor (a plain, scriptless Sprite2D) in place.
+	if _world:
+		for c in _world.get_children():
+			if c.get_script() != null:
+				c.queue_free()
+	_player = null
+	_camera = null
+	_boss = null
+
+# ── Menus (title / class-select / shop / achievements) ─────────────────────────
+func _clear_menu() -> void:
+	if _menu_ui:
+		_menu_ui.queue_free(); _menu_ui = null
+
+func _menu_base() -> VBoxContainer:
+	_clear_menu()
+	_menu_ui = CanvasLayer.new()
+	_menu_ui.layer = 10
+	add_child(_menu_ui)
+	var dim := ColorRect.new()
+	dim.color = Color(0.06, 0.05, 0.04, 1.0); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_menu_ui.add_child(dim)
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(20, 50); scroll.custom_minimum_size = Vector2(440, 700)
+	_menu_ui.add_child(scroll)
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(420, 0)
+	vbox.add_theme_constant_override("separation", 8)
+	scroll.add_child(vbox)
+	return vbox
+
+func _show_title() -> void:
+	var vbox := _menu_base()
+	var title := Label.new(); title.text = "IRONVOW"; vbox.add_child(title)
+	var stats := Label.new()
+	stats.text = "Best time: %d:%02d   Gold: %d" % [int(GameSave.best_time) / 60, int(GameSave.best_time) % 60, GameSave.gold]
+	vbox.add_child(stats)
+	var start_btn := Button.new(); start_btn.text = "Start Run"; start_btn.custom_minimum_size = Vector2(400, 56)
+	start_btn.pressed.connect(_show_class_select)
+	vbox.add_child(start_btn)
+	var shop_btn := Button.new(); shop_btn.text = "Armory"; shop_btn.custom_minimum_size = Vector2(400, 48)
+	shop_btn.pressed.connect(_show_shop)
+	vbox.add_child(shop_btn)
+	var ach_btn := Button.new(); ach_btn.text = "Achievements"; ach_btn.custom_minimum_size = Vector2(400, 48)
+	ach_btn.pressed.connect(_show_achievements)
+	vbox.add_child(ach_btn)
+
+func _show_class_select() -> void:
+	var vbox := _menu_base()
+	var hdr := Label.new(); hdr.text = "Choose your class"; vbox.add_child(hdr)
+	for cid in GameData.CLASSES:
+		var c: Dictionary = GameData.CLASSES[cid]
+		var unlocked := GameSave.class_unlocked(cid)
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(400, 56)
+		b.text = "%s\n%s" % [c["name"] if unlocked else "🔒 %s — %s" % [c["name"], _lock_text(c["unlock"])], c["blurb"] if unlocked else ""]
+		if cid == _selected_class:
+			b.modulate = Color(1.25, 1.25, 0.95)
+		b.pressed.connect(_pick_class.bind(cid))
+		vbox.add_child(b)
+
+	var weapon_hdr := Label.new(); weapon_hdr.text = "Weapon:"; vbox.add_child(weapon_hdr)
+	var cls: Dictionary = GameData.CLASSES[_selected_class]
+	for wid in cls["weapons"]:
+		var w: Dictionary = GameData.WEAPON_META[wid]
+		var wun := GameSave.weapon_unlocked(wid)
+		var wb := Button.new()
+		wb.custom_minimum_size = Vector2(400, 44)
+		wb.text = w["name"] if wun else "🔒 %s" % w["name"]
+		if wid == _selected_weapon:
+			wb.modulate = Color(1.25, 1.25, 0.95)
+		wb.pressed.connect(_pick_weapon.bind(wid))
+		vbox.add_child(wb)
+	var detail := Label.new()
+	detail.text = GameData.WEAPON_META[_selected_weapon]["desc"]
+	vbox.add_child(detail)
+
+	var begin_btn := Button.new(); begin_btn.text = "Begin"; begin_btn.custom_minimum_size = Vector2(400, 56)
+	begin_btn.disabled = not (GameSave.class_unlocked(_selected_class) and GameSave.weapon_unlocked(_selected_weapon))
+	begin_btn.pressed.connect(_begin_run.bind(_selected_class, _selected_weapon))
+	vbox.add_child(begin_btn)
+	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 44)
+	back_btn.pressed.connect(_show_title)
+	vbox.add_child(back_btn)
+
+func _pick_class(cid: String) -> void:
+	_selected_class = cid
+	_selected_weapon = GameData.CLASSES[cid]["weapon"]
+	_show_class_select()
+
+func _pick_weapon(wid: String) -> void:
+	_selected_weapon = wid
+	_show_class_select()
+
+func _lock_text(u: Dictionary) -> String:
+	match u["type"]:
+		"gold": return "Buy for %d gold" % int(u["cost"])
+		"achievement": return GameData.achievement_by_id(u["achievement"])["name"]
+	return "Locked"
+
+func _show_shop() -> void:
+	var vbox := _menu_base()
+	var gold_lbl := Label.new(); gold_lbl.text = "Gold: %d" % GameSave.gold; vbox.add_child(gold_lbl)
+
+	var upg_hdr := Label.new(); upg_hdr.text = "Permanent Upgrades"; vbox.add_child(upg_hdr)
+	for t in GameData.UPGRADE_TRACKS:
+		var id: String = t["id"]
+		var lvl: int = int(GameSave.upgrades.get(id, 0))
+		var maxed: bool = lvl >= int(t["max"])
+		var cost := GameData.upgrade_cost(id, lvl)
+		var row := Button.new()
+		row.custom_minimum_size = Vector2(400, 52)
+		row.disabled = maxed or GameSave.gold < cost
+		row.text = "%s  Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("MAX" if maxed else "%d g" % cost)]
+		row.pressed.connect(_buy_upgrade.bind(id))
+		vbox.add_child(row)
+
+	var unl_hdr := Label.new(); unl_hdr.text = "Unlocks"; vbox.add_child(unl_hdr)
+	for cid in GameData.CLASSES:
+		var c: Dictionary = GameData.CLASSES[cid]
+		if c["unlock"]["type"] == "gold" and not GameSave.class_unlocked(cid):
+			_shop_unlock_row(vbox, "%s (class)" % c["name"], int(c["unlock"]["cost"]), _buy_class_unlock.bind(cid, int(c["unlock"]["cost"])))
+	for wid in GameData.WEAPON_META:
+		var w: Dictionary = GameData.WEAPON_META[wid]
+		if w["unlock"]["type"] == "gold" and not GameSave.weapon_unlocked(wid):
+			_shop_unlock_row(vbox, w["name"], int(w["unlock"]["cost"]), _buy_weapon_unlock.bind(wid, int(w["unlock"]["cost"])))
+
+	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+	back_btn.pressed.connect(_show_title)
+	vbox.add_child(back_btn)
+
+func _shop_unlock_row(vbox: VBoxContainer, label: String, cost: int, handler: Callable) -> void:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(400, 48)
+	b.disabled = GameSave.gold < cost
+	b.text = "%s — %d g" % [label, cost]
+	b.pressed.connect(handler)
+	vbox.add_child(b)
+
+func _buy_upgrade(id: String) -> void:
+	var lvl: int = int(GameSave.upgrades.get(id, 0))
+	var cost := GameData.upgrade_cost(id, lvl)
+	if GameSave.gold >= cost:
+		GameSave.gold -= cost
+		GameSave.upgrades[id] = lvl + 1
+		GameSave.save_data()
+		_show_shop()
+
+func _buy_class_unlock(cid: String, cost: int) -> void:
+	if GameSave.gold >= cost:
+		GameSave.gold -= cost
+		GameSave.unlocked_classes[cid] = true
+		GameSave.save_data()
+		_show_shop()
+
+func _buy_weapon_unlock(wid: String, cost: int) -> void:
+	if GameSave.gold >= cost:
+		GameSave.gold -= cost
+		GameSave.unlocked_weapons[wid] = true
+		GameSave.save_data()
+		_show_shop()
+
+func _show_achievements() -> void:
+	var vbox := _menu_base()
+	var hdr := Label.new(); hdr.text = "Achievements"; vbox.add_child(hdr)
+	for a in GameData.ACHIEVEMENTS:
+		var done: bool = bool(GameSave.achievements.get(a["id"], false))
+		var row := Label.new()
+		row.text = "%s %s\n%s\nUnlocks: %s" % [("✓" if done else "—"), a["name"], a["desc"], a["unlocks"]]
+		vbox.add_child(row)
+	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+	back_btn.pressed.connect(_show_title)
+	vbox.add_child(back_btn)
+
+func _return_to_title() -> void:
+	if _end_ui:
+		_end_ui.queue_free(); _end_ui = null
+	get_tree().paused = false
+	_clear_run()
+	_show_title()
 
 func add_gold(amount: float) -> void:
 	run_gold += amount
@@ -242,8 +436,7 @@ func _trigger_victory() -> void:
 	if _state != "playing":
 		return
 	_state = "won"
-	get_tree().paused = true
-	_show_end_screen("Victory!")
+	_end_run("Victory!")
 
 # ── Level-up: pick an ability (ported from openLevelUp in js/game.js) ──────────
 func _on_level_up() -> void:
@@ -381,38 +574,83 @@ func _update_hud() -> void:
 func _on_player_died() -> void:
 	if _state != "playing":
 		return
+	if _try_revive():
+		return
 	_state = "dead"
-	get_tree().paused = true
-	_show_end_screen("You Died")
+	_end_run("You Died")
 
-func _show_end_screen(title: String) -> void:
+# Second-chance revive (ported from revivePlayer in js/game.js): consumes a
+# Revive charge, heals to half, and shoves back (and damages) the nearby swarm.
+func _try_revive() -> bool:
+	if _player.revives <= 0:
+		return false
+	_player.revives -= 1
+	_player.hp = roundf(_player.max_hp * 0.5)
+	_player.invuln = 2.5
+	_show_banner("Second Wind!")
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var off: Vector2 = e.global_position - _player.global_position
+		var d := off.length()
+		if d < 210.0:
+			var dir: Vector2 = off / maxf(d, 1.0)
+			e.global_position += dir * 230.0
+			if not e.is_boss:
+				e.take_damage(e.max_hp, false)
+	return true
+
+# Persists run results to GameSave (ported from the shared tail of die()/
+# victory() in js/game.js) and shows the death/victory screen.
+func _end_run(title: String) -> void:
+	get_tree().paused = true
+	var fresh := _check_run_achievements()
+	GameSave.gold += int(floor(run_gold))
+	GameSave.total_kills += run_kills
+	GameSave.class_kills[_player.cls_id] = int(GameSave.class_kills.get(_player.cls_id, 0)) + run_kills
+	if elapsed > GameSave.best_time:
+		GameSave.best_time = elapsed
+	GameSave.save_data()
+	_show_end_screen(title, fresh)
+
+func _check_run_achievements() -> Array:
+	var merged_kills: Dictionary = GameSave.class_kills.duplicate()
+	merged_kills[_player.cls_id] = int(merged_kills.get(_player.cls_id, 0)) + run_kills
+	var stats := {
+		"time": elapsed, "level": float(_player.level),
+		"total_kills": float(GameSave.total_kills + run_kills),
+		"class_kills": merged_kills,
+	}
+	var fresh: Array = GameData.check_achievements(stats, GameSave.achievements)
+	for id in fresh:
+		GameSave.achievements[id] = true
+		GameSave.apply_unlock(id)
+	return fresh
+
+func _show_end_screen(title: String, fresh: Array) -> void:
 	_end_ui = CanvasLayer.new()
 	_end_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	_end_ui.layer = 10
 	add_child(_end_ui)
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.7); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_end_ui.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_CENTER)
-	vbox.position = Vector2(90, 280); vbox.custom_minimum_size = Vector2(300, 0)
+	vbox.position = Vector2(70, 240); vbox.custom_minimum_size = Vector2(340, 0)
 	vbox.add_theme_constant_override("separation", 12)
 	_end_ui.add_child(vbox)
 	var t := Label.new(); t.text = title; vbox.add_child(t)
 	var stats := Label.new()
-	stats.text = "Time: %d:%02d\nKills: %d\nGold: %d" % [int(elapsed) / 60, int(elapsed) % 60, run_kills, int(run_gold)]
+	stats.text = "Time: %d:%02d\nKills: %d\nGold: +%d" % [int(elapsed) / 60, int(elapsed) % 60, run_kills, int(floor(run_gold))]
 	vbox.add_child(stats)
-	var btn := Button.new(); btn.text = "Restart"; btn.custom_minimum_size = Vector2(200, 48)
-	btn.pressed.connect(_restart_run)
+	if not fresh.is_empty():
+		var lines := ["Unlocked!"]
+		for id in fresh:
+			var a: Dictionary = GameData.achievement_by_id(id)
+			lines.append("%s — %s" % [a["name"], a["unlocks"]])
+		var ul := Label.new(); ul.text = "\n".join(lines)
+		vbox.add_child(ul)
+	var btn := Button.new(); btn.text = "Continue"; btn.custom_minimum_size = Vector2(300, 48)
+	btn.pressed.connect(_return_to_title)
 	vbox.add_child(btn)
-
-func _restart_run() -> void:
-	if _end_ui:
-		_end_ui.queue_free(); _end_ui = null
-	get_tree().paused = false
-	for c in _world.get_children():
-		c.queue_free()
-	call_deferred("_build_world")
-	call_deferred("_start_run")
 
 # ── Headless self-test ────────────────────────────────────────────────────────
 func _run_selftest() -> void:
@@ -473,16 +711,26 @@ func _run_bosstest() -> void:
 		t, _state, _next_mini, run_kills, run_gold])
 	get_tree().quit(0)
 
-# Verifies the death/game-over path: lethal damage -> "dead" state, paused,
-# end screen shown, then Restart returns to a fresh "playing" run.
+# Verifies the full death/game-over loop: lethal damage -> "dead" state +
+# paused end screen -> Continue returns to the title -> a fresh run begins
+# clean. Also exercises GameSave persistence (gold/best_time/total_kills).
 func _run_deathtest() -> void:
 	await get_tree().process_frame
+	run_gold = 42.0
 	_player.take_damage(999999.0)
 	await get_tree().process_frame
 	var dead_ok := _state == "dead" and get_tree().paused and _end_ui != null
-	_restart_run()
+	var saved_ok := GameSave.gold >= 42 and GameSave.total_kills >= 0
+	# Round-trip the save file itself (simulates relaunching the game).
+	var gold_before_reload := GameSave.gold
+	GameSave.load_data()
+	var reload_ok := GameSave.gold == gold_before_reload
+	_return_to_title()
 	await get_tree().process_frame
+	var title_ok := _menu_ui != null and not get_tree().paused and _player == null
+	_begin_run(DEFAULT_TEST_CLASS, "")
 	await get_tree().process_frame
-	var restart_ok := _state == "playing" and not get_tree().paused and _player.hp == _player.max_hp
-	print("[DEATHTEST] dead_ok=%s restart_ok=%s" % [str(dead_ok), str(restart_ok)])
+	var restart_ok := _state == "playing" and _player != null and is_instance_valid(_player) and _player.hp == _player.max_hp
+	print("[DEATHTEST] dead_ok=%s saved_ok=%s reload_ok=%s title_ok=%s restart_ok=%s gold=%d" % [
+		str(dead_ok), str(saved_ok), str(reload_ok), str(title_ok), str(restart_ok), GameSave.gold])
 	get_tree().quit(0)

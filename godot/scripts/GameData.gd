@@ -2,14 +2,27 @@ extends Node
 ## Static game data ported from the JS build (js/classes.js +
 ## assets/anim/manifest.json). Autoloaded as `GameData`.
 
-# The six playable classes (base stat tilt + starter weapon).
+# The six playable classes (base stat tilt + weapon pool), ported from
+# js/classes.js. `unlock.type` is "default" | "gold" | "achievement".
 const CLASSES := {
-	"knight":    {"name": "Knight",    "color": "c9d1e0", "max_hp": 140.0, "speed": 175.0, "damage": 12.0, "crit": 0.03, "regen": 0.2, "weapon": "arming_sword"},
-	"archer":    {"name": "Archer",    "color": "7bdc8a", "max_hp": 90.0,  "speed": 195.0, "damage": 11.0, "crit": 0.08, "regen": 0.0, "weapon": "shortbow"},
-	"mage":      {"name": "Mage",      "color": "6aa9ff", "max_hp": 70.0,  "speed": 180.0, "damage": 16.0, "crit": 0.05, "regen": 0.0, "weapon": "fireball"},
-	"rogue":     {"name": "Rogue",     "color": "e8c14a", "max_hp": 80.0,  "speed": 215.0, "damage": 8.0,  "crit": 0.18, "regen": 0.0, "weapon": "daggers"},
-	"cleric":    {"name": "Cleric",    "color": "f0e6b0", "max_hp": 100.0, "speed": 180.0, "damage": 10.0, "crit": 0.04, "regen": 1.0, "weapon": "holy_bolt"},
-	"barbarian": {"name": "Barbarian", "color": "e2655a", "max_hp": 130.0, "speed": 185.0, "damage": 14.0, "crit": 0.06, "regen": 0.0, "weapon": "whirlwind_axe"},
+	"knight":    {"name": "Knight",    "color": "c9d1e0", "blurb": "Stalwart defender. High HP, sweeping melee arcs.",
+		"max_hp": 140.0, "speed": 175.0, "damage": 12.0, "crit": 0.03, "regen": 0.2,
+		"weapon": "arming_sword", "weapons": ["arming_sword", "warhammer"], "unlock": {"type": "default"}},
+	"archer":    {"name": "Archer",    "color": "7bdc8a", "blurb": "Ranged marksman. Piercing arrows from afar.",
+		"max_hp": 90.0,  "speed": 195.0, "damage": 11.0, "crit": 0.08, "regen": 0.0,
+		"weapon": "shortbow", "weapons": ["shortbow", "crossbow"], "unlock": {"type": "gold", "cost": 150}},
+	"mage":      {"name": "Mage",      "color": "6aa9ff", "blurb": "Glass cannon. Explosive area damage, frail.",
+		"max_hp": 70.0,  "speed": 180.0, "damage": 16.0, "crit": 0.05, "regen": 0.0,
+		"weapon": "fireball", "weapons": ["fireball", "frost_nova"], "unlock": {"type": "gold", "cost": 250}},
+	"rogue":     {"name": "Rogue",     "color": "e8c14a", "blurb": "Swift assassin. Fast, crit-heavy daggers.",
+		"max_hp": 80.0,  "speed": 215.0, "damage": 8.0,  "crit": 0.18, "regen": 0.0,
+		"weapon": "daggers", "weapons": ["daggers", "fan_of_knives"], "unlock": {"type": "gold", "cost": 200}},
+	"cleric":    {"name": "Cleric",    "color": "f0e6b0", "blurb": "Holy support. Sustains through constant regen.",
+		"max_hp": 100.0, "speed": 180.0, "damage": 10.0, "crit": 0.04, "regen": 1.0,
+		"weapon": "holy_bolt", "weapons": ["holy_bolt", "censer"], "unlock": {"type": "achievement", "achievement": "survive_8"}},
+	"barbarian": {"name": "Barbarian", "color": "e2655a", "blurb": "Raging bruiser. Whirling orbital axes.",
+		"max_hp": 130.0, "speed": 185.0, "damage": 14.0, "crit": 0.06, "regen": 0.0,
+		"weapon": "whirlwind_axe", "weapons": ["whirlwind_axe", "throwing_axe"], "unlock": {"type": "achievement", "achievement": "level_15"}},
 }
 
 # Animation layout (mirrors assets/anim/manifest.json). The five base
@@ -25,19 +38,91 @@ const ANIMATED_CLASSES := ["knight", "archer", "mage", "rogue", "cleric"]
 
 # Weapon metadata, ported from js/weapons.js. Fire logic lives in Weapons.gd.
 const WEAPON_META := {
-	"arming_sword":  {"name": "Arming Sword",     "type": "melee",      "cooldown": 0.7},
-	"warhammer":     {"name": "Warhammer",        "type": "melee",      "cooldown": 1.3},
-	"shortbow":      {"name": "Shortbow",         "type": "projectile", "cooldown": 0.6},
-	"crossbow":      {"name": "Crossbow",         "type": "projectile", "cooldown": 0.35},
-	"fireball":      {"name": "Fireball",         "type": "projectile", "cooldown": 0.85},
-	"frost_nova":    {"name": "Frost Nova",       "type": "nova",       "cooldown": 1.5},
-	"daggers":       {"name": "Throwing Daggers", "type": "projectile", "cooldown": 0.28},
-	"fan_of_knives": {"name": "Fan of Knives",    "type": "projectile", "cooldown": 0.7},
-	"holy_bolt":     {"name": "Holy Bolt",        "type": "projectile", "cooldown": 0.7},
-	"censer":        {"name": "Holy Censer",      "type": "orbital",    "cooldown": 0.7},
-	"whirlwind_axe": {"name": "Whirlwind Axe",    "type": "orbital",    "cooldown": 0.7},
-	"throwing_axe":  {"name": "Throwing Axe",     "type": "projectile", "cooldown": 0.9},
+	"arming_sword":  {"name": "Arming Sword",     "type": "melee",      "cooldown": 0.7,
+		"desc": "Sweeping arc that strikes all foes in front.", "unlock": {"type": "default"}},
+	"warhammer":     {"name": "Warhammer",        "type": "melee",      "cooldown": 1.3,
+		"desc": "Slow, devastating slam with heavy knockback.", "unlock": {"type": "gold", "cost": 120}},
+	"shortbow":      {"name": "Shortbow",         "type": "projectile", "cooldown": 0.6,
+		"desc": "Fires an arrow that pierces one enemy.", "unlock": {"type": "default"}},
+	"crossbow":      {"name": "Crossbow",         "type": "projectile", "cooldown": 0.35,
+		"desc": "Rapid bolts that punch through three foes.", "unlock": {"type": "achievement", "achievement": "archer_kills_500"}},
+	"fireball":      {"name": "Fireball",         "type": "projectile", "cooldown": 0.85,
+		"desc": "Hurls a fireball that bursts on impact.", "unlock": {"type": "default"}},
+	"frost_nova":    {"name": "Frost Nova",       "type": "nova",       "cooldown": 1.5,
+		"desc": "Erupts frost around you, chilling all nearby.", "unlock": {"type": "achievement", "achievement": "survive_12"}},
+	"daggers":       {"name": "Throwing Daggers", "type": "projectile", "cooldown": 0.28,
+		"desc": "Flings rapid daggers with a high crit rate.", "unlock": {"type": "default"}},
+	"fan_of_knives": {"name": "Fan of Knives",    "type": "projectile", "cooldown": 0.7,
+		"desc": "Throws a spread volley of knives at once.", "unlock": {"type": "gold", "cost": 140}},
+	"holy_bolt":     {"name": "Holy Bolt",        "type": "projectile", "cooldown": 0.7,
+		"desc": "Looses a bolt of light; a healing aura sustains you.", "unlock": {"type": "default"}},
+	"censer":        {"name": "Holy Censer",      "type": "orbital",    "cooldown": 0.7,
+		"desc": "Censers of holy flame orbit and scorch the unworthy.", "unlock": {"type": "gold", "cost": 160}},
+	"whirlwind_axe": {"name": "Whirlwind Axe",    "type": "orbital",    "cooldown": 0.7,
+		"desc": "Axes whirl around you, cleaving anything close.", "unlock": {"type": "default"}},
+	"throwing_axe":  {"name": "Throwing Axe",     "type": "projectile", "cooldown": 0.9,
+		"desc": "Lobs a heavy axe that tears through ranks.", "unlock": {"type": "gold", "cost": 150}},
 }
+
+# Achievements, ported from js/achievements.js. `metric` selects which run-stat
+# field check_achievements() compares against `value`.
+const ACHIEVEMENTS := [
+	{"id": "survive_8", "name": "Hold the Line", "desc": "Survive 8:00 in a single run.", "unlocks": "Cleric (class)", "metric": "time", "value": 480.0},
+	{"id": "level_15", "name": "Seasoned", "desc": "Reach level 15 in a single run.", "unlocks": "Barbarian (class)", "metric": "level", "value": 15.0},
+	{"id": "survive_12", "name": "Unbroken", "desc": "Survive 12:00 in a single run.", "unlocks": "Frost Nova (Mage weapon)", "metric": "time", "value": 720.0},
+	{"id": "archer_kills_500", "name": "Fletcher", "desc": "Slay 500 foes as the Archer (lifetime).", "unlocks": "Crossbow (Archer weapon)", "metric": "archer_kills", "value": 500.0},
+	{"id": "kills_1000", "name": "Reaper", "desc": "Slay 1000 foes (lifetime).", "unlocks": "500 bonus gold", "metric": "total_kills", "value": 1000.0},
+]
+
+func check_achievements(stats: Dictionary, earned: Dictionary) -> Array:
+	var fresh := []
+	for a in ACHIEVEMENTS:
+		if earned.get(a["id"], false):
+			continue
+		var ok := false
+		match a["metric"]:
+			"time": ok = stats["time"] >= a["value"]
+			"level": ok = stats["level"] >= a["value"]
+			"total_kills": ok = stats["total_kills"] >= a["value"]
+			"archer_kills": ok = float(stats["class_kills"].get("archer", 0)) >= a["value"]
+		if ok:
+			fresh.append(a["id"])
+	return fresh
+
+func achievement_by_id(id: String) -> Dictionary:
+	for a in ACHIEVEMENTS:
+		if a["id"] == id:
+			return a
+	return {}
+
+# Permanent meta-upgrade tracks (bought with gold in the Armory), ported from
+# UPGRADE_TRACKS in js/game.js.
+const UPGRADE_TRACKS := [
+	{"id": "vigor", "name": "Vigor", "max": 8},
+	{"id": "might", "name": "Might", "max": 8},
+	{"id": "haste", "name": "Haste", "max": 6},
+	{"id": "fortune", "name": "Fortune", "max": 6},
+	{"id": "revive", "name": "Revive", "max": 2},
+]
+
+func upgrade_cost(id: String, lvl: int) -> int:
+	match id:
+		"vigor": return roundi(40.0 * pow(1.6, lvl))
+		"might", "haste": return roundi(50.0 * pow(1.6, lvl))
+		"fortune": return roundi(60.0 * pow(1.6, lvl))
+		"revive":
+			var costs := [300, 800]
+			return costs[lvl] if lvl < costs.size() else 9999
+	return 9999
+
+func upgrade_desc(id: String, lvl: int) -> String:
+	match id:
+		"vigor": return "+%d max HP" % (lvl * 20)
+		"might": return "+%d%% damage" % (lvl * 8)
+		"haste": return "+%d%% move speed" % (lvl * 5)
+		"fortune": return "+%d%% gold, +%d%% XP" % [lvl * 10, lvl * 8]
+		"revive": return "%d second chance%s per run" % [lvl, "" if lvl == 1 else "s"]
+	return ""
 
 # Enemy archetypes, ported from js/enemies.js (ENEMY_BASE). `kind` selects the AI.
 const ENEMY_BASE := {
