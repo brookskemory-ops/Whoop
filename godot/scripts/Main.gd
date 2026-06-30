@@ -90,12 +90,51 @@ func _process(delta: float) -> void:
 	_update_hud()
 
 func _spawn_enemy() -> void:
+	var m := elapsed / 60.0
+	var key := _weighted_archetype(m)
 	var ang := randf() * TAU
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6 + 40.0
+	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
+	var e: Node = add_enemy(key, pos, 1.0 + m * 0.35)
+	# Occasional elite (ported from js/game.js spawnEnemy).
+	if m > 1.0 and randf() < 0.06:
+		e.elite = true
+		e.hp *= 3.2; e.max_hp = e.hp; e.radius *= 1.3; e.dmg *= 1.4; e.gold *= 4.0; e.xp *= 3.0
+
+func _weighted_archetype(m: float) -> String:
+	var choices := [
+		["skeleton", 10.0], ["goblin", 3.0 + m], ["ogre", maxf(0.0, m - 0.5)],
+		["shooter", maxf(0.0, m - 1.0) * 1.2], ["exploder", maxf(0.0, m - 1.5) * 1.1],
+		["splitter", maxf(0.0, m - 2.0)], ["charger", maxf(0.0, m - 2.5)],
+	]
+	var total := 0.0
+	for c in choices: total += c[1]
+	var roll := randf() * total
+	for c in choices:
+		roll -= c[1]
+		if roll <= 0.0:
+			return c[0]
+	return "skeleton"
+
+# ── Combat ctx the enemies/projectiles call back into ─────────────────────────
+func add_enemy(key: String, pos: Vector2, scale_mult: float) -> Node:
 	var e := preload("res://scripts/Enemy.gd").new()
-	e.setup(1.0 + (elapsed / 60.0) * 0.35)
-	e.global_position = _player.global_position + Vector2(cos(ang), sin(ang)) * dist
+	e.setup(key, scale_mult)
+	e.global_position = pos
 	_world.add_child(e)
+	return e
+
+func spawn_enemy_projectile(pos: Vector2, vel: Vector2, dmg: float, col: Color) -> void:
+	var pr := preload("res://scripts/EnemyProjectile.gd").new()
+	pr.setup(pos, vel, dmg, col)
+	_world.add_child(pr)
+
+func hurt_area(pos: Vector2, r: float, amount: float) -> void:
+	if _player and _player.global_position.distance_to(pos) < r + _player.radius():
+		_player.take_damage(amount)
+
+func on_final_boss_killed() -> void:
+	pass  # victory state — Phase 2
 
 # ── Input: touch joystick (falls back to mouse) + WASD/arrows ─────────────────
 func _read_input() -> Vector2:
@@ -153,6 +192,9 @@ func _on_player_died() -> void:
 func _run_selftest() -> void:
 	# Drive the player in a slow circle so combat/animation actually exercise.
 	_testing = true
+	# Force one of every archetype so all AI branches run at least once.
+	for key in ["shooter", "exploder", "splitter", "charger", "ogre", "miniboss", "finalboss"]:
+		add_enemy(key, _player.global_position + Vector2(randf_range(-180, 180), randf_range(-180, 180)), 1.0)
 	var t := 0.0
 	while t < 8.0:
 		await get_tree().process_frame

@@ -20,15 +20,12 @@ func _process(delta: float) -> void:
 	var d := to.length()
 	if d < PICKUP_RANGE:
 		global_position += to.normalized() * 340.0 * delta
-	if d < player_radius(player) + radius:
+	if d < player.radius() + radius:
 		player.gain_xp(_xp)
 		var main := get_tree().current_scene
 		if main and main.has_method("add_gold"):
 			main.add_gold(_gold)
 		queue_free()
-
-func player_radius(_p: Node2D) -> float:
-	return 14.0
 
 func _draw() -> void:
 	draw_circle(Vector2.ZERO, radius, Color("4ad6e8"))

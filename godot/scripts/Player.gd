@@ -97,6 +97,9 @@ func gain_xp(amount: float) -> void:
 		level += 1
 		xp_next = floor(xp_next * 1.35 + 3.0)
 
+func radius() -> float:
+	return 14.0
+
 func _nearest_enemy() -> Node2D:
 	var best: Node2D = null
 	var bd := INF
