@@ -45,7 +45,8 @@ static func burst(world: Node, pos: Vector2, color: Color, amount: int = 14, spe
 		if is_instance_valid(p): p.queue_free()
 	)
 
-## Expanding, fading ring — used for level-ups and boss-spawn telegraphs.
+## Expanding, fading ring — used for level-ups, boss-spawn telegraphs, and
+## nova/slam ability impacts.
 static func ring(world: Node, pos: Vector2, color: Color, max_radius: float = 60.0, life: float = 0.4) -> void:
 	if world == null or not is_instance_valid(world):
 		return
@@ -56,3 +57,18 @@ static func ring(world: Node, pos: Vector2, color: Color, max_radius: float = 60
 	r.life = life
 	r.z_index = 60
 	world.add_child(r)
+
+## Fading connector line — used by chain-mechanic abilities to show the
+## lightning/light/dagger leaping from one foe to the next.
+static func chain_link(world: Node, from: Vector2, to: Vector2, color: Color, width: float = 2.5, life: float = 0.25) -> void:
+	if world == null or not is_instance_valid(world):
+		return
+	var l := preload("res://scripts/VfxChainLink.gd").new()
+	l.global_position = from
+	l.width = width
+	l.default_color = color
+	l.add_point(Vector2.ZERO)
+	l.add_point(to - from)
+	l.life = life
+	l.z_index = 55
+	world.add_child(l)
