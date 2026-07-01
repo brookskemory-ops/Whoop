@@ -165,7 +165,12 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
 	_boss = null; _next_mini = 0; _final_spawned = false
 	_banner_text = ""; _banner_timer = 0.0
+	# Force-clear the header now: a fresh player's skills list is also empty,
+	# so resetting the sig to "" alone wouldn't trigger the change-detection
+	# in _update_hud() (it'd compare "" against "" and see "no change"),
+	# leaving the previous run's ability badges stuck on screen.
 	_ability_header_sig = ""
+	_refresh_ability_header()
 	_last_beat = 0.0; _shake = 0.0; _flash = 0.0
 	_state = "playing"
 	GameAudio.start_music()
