@@ -13,6 +13,8 @@ var achievements := {}
 var total_kills := 0
 var class_kills := {}
 var upgrades := {}
+var volume := 0.7
+var muted := false
 
 func _ready() -> void:
 	load_data()
@@ -26,6 +28,8 @@ func load_data() -> void:
 	total_kills = 0
 	class_kills = {}
 	upgrades = {"vigor": 0, "might": 0, "haste": 0, "fortune": 0, "revive": 0}
+	volume = 0.7
+	muted = false
 
 	if FileAccess.file_exists(SAVE_PATH):
 		var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
@@ -43,6 +47,8 @@ func load_data() -> void:
 			for k in upgrades:
 				if u.has(k):
 					upgrades[k] = u[k]
+			volume = float(parsed.get("volume", 0.7))
+			muted = bool(parsed.get("muted", false))
 
 	for id in GameData.CLASSES:
 		if GameData.CLASSES[id]["unlock"]["type"] == "default":
@@ -60,6 +66,7 @@ func save_data() -> void:
 		"unlocked_classes": unlocked_classes, "unlocked_weapons": unlocked_weapons,
 		"achievements": achievements, "total_kills": total_kills,
 		"class_kills": class_kills, "upgrades": upgrades,
+		"volume": volume, "muted": muted,
 	}))
 	f.close()
 

@@ -31,6 +31,18 @@ var _banner_timer := 0.0
 var _end_ui: CanvasLayer
 var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 
+# Juice: screen shake, level-up/pickup flash, torch lighting, low-HP vignette.
+var _shake := 0.0
+var _flash := 0.0
+var _canvas_mod: CanvasModulate
+var _torch: PointLight2D
+var _flash_overlay: ColorRect
+var _vignette: TextureRect
+
+# Pause + settings
+var _pause_ui: CanvasLayer
+var _settings_ui: CanvasLayer
+
 # HUD
 var _lbl_level: Label
 var _lbl_time: Label
@@ -60,10 +72,12 @@ var _test_dir := Vector2.ZERO
 
 func _ready() -> void:
 	randomize()
+	GameAudio.config(GameSave.volume, GameSave.muted)
 	if _has_flag("--fast") or _has_flag("--bosstest"):
 		_win_time = 12.0
 		_mini_times = [3.0, 6.0, 9.0]
 	_build_world()
+	_build_lighting()
 	_build_hud()
 	if _has_flag("--selftest"):
 		_begin_run(DEFAULT_TEST_CLASS, "")
@@ -76,6 +90,9 @@ func _ready() -> void:
 		_run_deathtest()
 	elif _has_flag("--audiotest"):
 		_run_audiotest()
+	elif _has_flag("--pausetest"):
+		_begin_run(DEFAULT_TEST_CLASS, "")
+		_run_pausetest()
 	else:
 		_show_title()
 
@@ -97,6 +114,38 @@ func _build_world() -> void:
 	floor_spr.z_index = -100
 	_world.add_child(floor_spr)
 
+# ── Lighting: CanvasModulate darkens the world; a PointLight2D "torch" that
+# follows the player reveals a flickering radius around them (ported from the
+# torchFlicker/litR radial-gradient overlay in js/game.js's render()). Both
+# CanvasModulate and Light2D only affect the base canvas — the HUD/menu
+# CanvasLayers stay unaffected, matching the JS's canvas-vs-DOM split.
+func _build_lighting() -> void:
+	_canvas_mod = CanvasModulate.new()
+	_canvas_mod.color = Color(0.09, 0.08, 0.07, 1.0)
+	add_child(_canvas_mod)
+
+	_torch = PointLight2D.new()
+	_torch.texture = _make_radial_gradient_texture(Vector2(512, 512), Color(1, 1, 1, 1), Color(1, 1, 1, 0))
+	_torch.color = Color(1.0, 0.93, 0.8, 1.0)
+	_torch.energy = 1.5
+	add_child(_torch)
+
+func _make_radial_gradient_texture(size: Vector2, c0: Color, c1: Color) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.colors = PackedColorArray([c0, c1])
+	g.offsets = PackedFloat32Array([0.0, 1.0])
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.width = int(size.x)
+	tex.height = int(size.y)
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	return tex
+
+func add_shake(n: float) -> void:
+	_shake = minf(16.0, _shake + n)
+
 func _begin_run(class_id: String, weapon_id: String) -> void:
 	_clear_menu()
 	_clear_run()
@@ -116,7 +165,7 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
 	_boss = null; _next_mini = 0; _final_spawned = false
 	_banner_text = ""; _banner_timer = 0.0
-	_last_beat = 0.0
+	_last_beat = 0.0; _shake = 0.0; _flash = 0.0
 	_state = "playing"
 	GameAudio.start_music()
 
@@ -168,6 +217,9 @@ func _show_title() -> void:
 	var ach_btn := Button.new(); ach_btn.text = "Achievements"; ach_btn.custom_minimum_size = Vector2(400, 48)
 	ach_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_achievements())
 	vbox.add_child(ach_btn)
+	var settings_btn := Button.new(); settings_btn.text = "Settings"; settings_btn.custom_minimum_size = Vector2(400, 48)
+	settings_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_settings(_show_title))
+	vbox.add_child(settings_btn)
 
 func _show_class_select() -> void:
 	var vbox := _menu_base()
@@ -309,6 +361,106 @@ func _return_to_title() -> void:
 	_clear_run()
 	_show_title()
 
+# ── Pause + Settings (ported from togglePause()/pause-screen/settings-screen
+# in js/game.js) ────────────────────────────────────────────────────────────
+func _open_pause() -> void:
+	if _state != "playing" or get_tree().paused:
+		return
+	get_tree().paused = true
+	_show_pause()
+
+func _show_pause() -> void:
+	if _pause_ui:
+		_pause_ui.queue_free(); _pause_ui = null
+	_pause_ui = CanvasLayer.new()
+	_pause_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	_pause_ui.layer = 10
+	add_child(_pause_ui)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.7); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pause_ui.add_child(dim)
+	var vbox := VBoxContainer.new()
+	vbox.position = Vector2(70, 260); vbox.custom_minimum_size = Vector2(340, 0)
+	vbox.add_theme_constant_override("separation", 12)
+	_pause_ui.add_child(vbox)
+	var hdr := Label.new(); hdr.text = "Paused"; vbox.add_child(hdr)
+	var resume_btn := Button.new(); resume_btn.text = "Resume"; resume_btn.custom_minimum_size = Vector2(300, 48)
+	resume_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _resume_from_pause())
+	vbox.add_child(resume_btn)
+	var settings_btn := Button.new(); settings_btn.text = "Settings"; settings_btn.custom_minimum_size = Vector2(300, 48)
+	settings_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_settings(_show_pause))
+	vbox.add_child(settings_btn)
+	var quit_btn := Button.new(); quit_btn.text = "Quit to Title"; quit_btn.custom_minimum_size = Vector2(300, 48)
+	quit_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _quit_run())
+	vbox.add_child(quit_btn)
+
+func _resume_from_pause() -> void:
+	if _pause_ui:
+		_pause_ui.queue_free(); _pause_ui = null
+	get_tree().paused = false
+
+# Abandons the run without persisting gold/kills/achievements (ported from
+# quit-btn in js/game.js, distinct from _return_to_title which only follows a
+# completed run where _end_run already saved everything).
+func _quit_run() -> void:
+	GameAudio.stop_music()
+	if _pause_ui:
+		_pause_ui.queue_free(); _pause_ui = null
+	get_tree().paused = false
+	_clear_run()
+	_show_title()
+
+func _show_settings(return_fn: Callable) -> void:
+	_clear_menu()
+	if _pause_ui:
+		_pause_ui.queue_free(); _pause_ui = null
+	if _settings_ui:
+		_settings_ui.queue_free(); _settings_ui = null
+	var layer := CanvasLayer.new()
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	layer.layer = 10
+	add_child(layer)
+	_settings_ui = layer
+	var dim := ColorRect.new()
+	dim.color = Color(0.06, 0.05, 0.04, 1.0); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(dim)
+	var vbox := VBoxContainer.new()
+	vbox.position = Vector2(40, 220); vbox.custom_minimum_size = Vector2(400, 0)
+	vbox.add_theme_constant_override("separation", 14)
+	layer.add_child(vbox)
+	var hdr := Label.new(); hdr.text = "Settings"; vbox.add_child(hdr)
+	var vol_lbl := Label.new(); vol_lbl.text = "Volume"; vbox.add_child(vol_lbl)
+	var slider := HSlider.new()
+	slider.min_value = 0; slider.max_value = 100; slider.step = 1
+	slider.value = GameSave.volume * 100.0
+	slider.custom_minimum_size = Vector2(380, 32)
+	slider.value_changed.connect(_on_volume_changed)
+	vbox.add_child(slider)
+	var mute_btn := Button.new()
+	mute_btn.text = "🔇 Muted" if GameSave.muted else "🔊 Sound On"
+	mute_btn.custom_minimum_size = Vector2(400, 48)
+	mute_btn.pressed.connect(_toggle_mute.bind(mute_btn))
+	vbox.add_child(mute_btn)
+	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+	back_btn.pressed.connect(func():
+		GameAudio.sfx("uiClick")
+		if _settings_ui == layer:
+			layer.queue_free(); _settings_ui = null
+		return_fn.call())
+	vbox.add_child(back_btn)
+
+func _on_volume_changed(v: float) -> void:
+	GameSave.volume = v / 100.0
+	GameAudio.set_volume(GameSave.volume)
+	GameSave.save_data()
+
+func _toggle_mute(btn: Button) -> void:
+	GameSave.muted = not GameSave.muted
+	GameAudio.set_muted(GameSave.muted)
+	GameSave.save_data()
+	GameAudio.sfx("uiClick")
+	btn.text = "🔇 Muted" if GameSave.muted else "🔊 Sound On"
+
 func add_gold(amount: float) -> void:
 	run_gold += amount
 
@@ -349,13 +501,41 @@ func _process(delta: float) -> void:
 		_last_beat = elapsed
 		GameAudio.sfx("heartbeat")
 
+	_update_visuals(delta)
 	_update_hud()
+
+# Screen shake, torch flicker, level-up/pickup flash, low-HP vignette — ported
+# from the shake/flash/torchFlicker/litR/vignette block in js/game.js's
+# update()+render().
+func _update_visuals(delta: float) -> void:
+	if _shake > 0.0:
+		_shake = maxf(0.0, _shake - delta * 36.0)
+	if _flash > 0.0:
+		_flash = maxf(0.0, _flash - delta * 2.0)
+
+	_camera.offset = Vector2(randf_range(-0.5, 0.5), randf_range(-0.5, 0.5)) * _shake if _shake > 0.0 else Vector2.ZERO
+
+	var torch_flicker := sin(elapsed * 9.0) * 5.0 + sin(elapsed * 23.0) * 3.0
+	var lit_r := maxf(245.0, minf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6) + torch_flicker
+	_torch.global_position = _player.global_position
+	_torch.texture_scale = lit_r / 256.0
+
+	_flash_overlay.color.a = minf(0.5, _flash) * 0.5
+
+	var hp_frac := _player.hp / _player.max_hp
+	if hp_frac < 0.3:
+		var pulse := 0.35 + sin(elapsed * 7.0) * 0.15
+		_vignette.modulate.a = clampf(((0.3 - hp_frac) / 0.3) * pulse, 0.0, 1.0)
+	else:
+		_vignette.modulate.a = 0.0
 
 func spawn_boss(key: String) -> void:
 	var ang := randf() * TAU
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.55 + 60.0
 	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
 	_boss = add_enemy(key, pos, 1.0 + (elapsed / 60.0) * 0.06)
+	_flash = 0.6
+	add_shake(8.0)
 	GameAudio.sfx("levelup")
 	_show_banner("The Warden Awakens" if key == "finalboss" else "A Champion Approaches")
 
@@ -463,6 +643,7 @@ func _on_level_up() -> void:
 
 func _open_level_up() -> void:
 	while _pending_levels > 0:
+		_flash = 0.5
 		GameAudio.sfx("levelup")
 		var opts := Abilities.roll(_player.cls_id, _player.owned_ranks(), 5)
 		if opts.is_empty():
@@ -539,11 +720,33 @@ func _input(event: InputEvent) -> void:
 		_joy_vec = (event.position - _joy_base) / 50.0
 	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_SPACE:
 		if _player: _player.use_movement_ability()
+	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_ESCAPE:
+		# Only opens pause: once paused, Main._input() stops firing (default
+		# PROCESS_MODE_PAUSABLE), so closing is via the always-on-mode Resume
+		# button inside _pause_ui — matching js/game.js's Escape/pause-btn split.
+		if _state == "playing" and not get_tree().paused:
+			_open_pause()
 
 # ── HUD ───────────────────────────────────────────────────────────────────────
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+
+	# Low-HP vignette (behind the flash/HUD, above the game world).
+	_vignette = TextureRect.new()
+	_vignette.texture = _make_radial_gradient_texture(Vector2(480, 800), Color(0.667, 0.078, 0.078, 0.0), Color(0.588, 0.039, 0.039, 1.0))
+	_vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vignette.modulate.a = 0.0
+	layer.add_child(_vignette)
+
+	# Level-up / pickup flash.
+	_flash_overlay = ColorRect.new()
+	_flash_overlay.color = Color(1.0, 0.98, 0.9, 0.0)
+	_flash_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_flash_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(_flash_overlay)
+
 	_lbl_level = Label.new(); _lbl_level.position = Vector2(12, 8); layer.add_child(_lbl_level)
 	_lbl_time = Label.new(); _lbl_time.position = Vector2(380, 8); layer.add_child(_lbl_time)
 	var hp_bg := ColorRect.new()
@@ -556,6 +759,10 @@ func _build_hud() -> void:
 	ab_btn.text = "✦"; ab_btn.position = Vector2(390, 720); ab_btn.custom_minimum_size = Vector2(72, 72)
 	ab_btn.pressed.connect(func(): if _player: _player.use_movement_ability())
 	layer.add_child(ab_btn)
+	var pause_btn := Button.new()
+	pause_btn.text = "⏸"; pause_btn.position = Vector2(430, 4); pause_btn.custom_minimum_size = Vector2(44, 32)
+	pause_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _open_pause())
+	layer.add_child(pause_btn)
 
 	# Boss health bar (hidden until a boss is present).
 	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 52)
@@ -606,6 +813,8 @@ func _try_revive() -> bool:
 	_player.revives -= 1
 	_player.hp = roundf(_player.max_hp * 0.5)
 	_player.invuln = 2.5
+	_flash = 0.6
+	add_shake(8.0)
 	GameAudio.sfx("levelup")
 	_show_banner("Second Wind!")
 	for e in get_tree().get_nodes_in_group("enemies"):
@@ -782,4 +991,46 @@ func _run_audiotest() -> void:
 
 	print("[AUDIOTEST] peak=%.4f rms=%.6f nonsilent=%s in_range=%s drone_ok=%s" % [
 		peak, rms, str(peak > 0.001), str(peak <= 1.0), str(drone_ok)])
+	get_tree().quit(0)
+
+# Verifies pause -> settings (volume/mute, persisted) -> back -> resume, then
+# a second pause -> Quit to Title, confirming the quit path abandons the run
+# (no gold persisted) unlike the death/victory end-run path.
+func _run_pausetest() -> void:
+	await get_tree().process_frame
+	run_gold = 77.0
+	_open_pause()
+	await get_tree().process_frame
+	var pause_ok := get_tree().paused and _pause_ui != null
+
+	_show_settings(_show_pause)
+	await get_tree().process_frame
+	var settings_ok := _settings_ui != null and get_tree().paused
+	var muted_before := GameSave.muted
+	_on_volume_changed(40.0)
+	_toggle_mute(Button.new())
+	var vol_ok := is_equal_approx(GameSave.volume, 0.4) and GameSave.muted != muted_before
+	var muted_after_toggle := GameSave.muted
+	GameSave.load_data()
+	var settings_reload_ok := is_equal_approx(GameSave.volume, 0.4) and GameSave.muted == muted_after_toggle
+	var gold_before_settle := GameSave.gold
+
+	if _settings_ui:
+		_settings_ui.queue_free(); _settings_ui = null
+	_show_pause()
+	await get_tree().process_frame
+	var back_to_pause_ok := _pause_ui != null and get_tree().paused
+
+	_resume_from_pause()
+	await get_tree().process_frame
+	var resume_ok := not get_tree().paused and _pause_ui == null and _state == "playing"
+
+	_open_pause()
+	await get_tree().process_frame
+	_quit_run()
+	await get_tree().process_frame
+	var quit_ok := _player == null and not get_tree().paused and _menu_ui != null and GameSave.gold == gold_before_settle
+
+	print("[PAUSETEST] pause_ok=%s settings_ok=%s vol_ok=%s settings_reload_ok=%s back_to_pause_ok=%s resume_ok=%s quit_ok=%s" % [
+		str(pause_ok), str(settings_ok), str(vol_ok), str(settings_reload_ok), str(back_to_pause_ok), str(resume_ok), str(quit_ok)])
 	get_tree().quit(0)

@@ -224,6 +224,9 @@ func take_damage(amount: float) -> void:
 	hp -= amount
 	invuln = 0.6
 	_hurt_t = 0.3
+	var main := get_tree().current_scene
+	if main and main.has_method("add_shake"):
+		main.add_shake(7.0)
 	GameAudio.sfx("hurt")
 	if hp <= 0.0:
 		died.emit()

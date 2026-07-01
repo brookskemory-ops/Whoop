@@ -108,6 +108,7 @@ func _physics_process(delta: float) -> void:
 			if _atk <= 0.0:
 				_radial_burst(main, 12, 150.0, dmg * 0.55, Color("ff7ad0"), _phase)
 				_phase += 0.4; _atk = 2.6
+				main.add_shake(3.0)
 		"finalboss":
 			if d > 110.0: vel = dir * base_speed * slow
 			_atk -= delta
@@ -120,6 +121,7 @@ func _physics_process(delta: float) -> void:
 					for i in 3:
 						main.add_enemy("spawnling", global_position + Vector2(randf_range(-25, 25), randf_range(-25, 25)), 1.0)
 				_atk = 2.2
+				main.add_shake(4.0)
 
 	velocity = vel
 	move_and_slide()
@@ -154,9 +156,11 @@ func _die() -> void:
 	if main == null or not is_instance_valid(self):
 		return
 	GameAudio.sfx("enemyDie")
+	main.add_shake(6.0 if is_boss else 1.5)
 	# Death effects (onEnemyDeath in js/enemies.js).
 	if kind == "exploder":
 		main.hurt_area(global_position, 64.0, dmg)
+		main.add_shake(4.0)
 	elif kind == "splitter":
 		for i in 3:
 			var ang := (float(i) / 3.0) * TAU

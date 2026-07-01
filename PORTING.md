@@ -105,9 +105,36 @@ Runnable core slice, validated headlessly (`--selftest`):
   with audio now firing throughout (no script errors, no audio-driver issues
   running `--headless`).
 
-### Phase 3c — Lighting & pause (remaining)
-- Torch lighting (Light2D / CanvasModulate) + low-HP vignette + screen shake.
-- Pause screen + settings (volume/mute) — currently no in-run pause menu.
+### Phase 3c — Lighting, juice & pause (DONE)
+- **Torch lighting**: a `CanvasModulate` darkens the world; a `PointLight2D`
+  ("torch") follows the player, using a runtime-generated radial
+  `GradientTexture2D` (no image asset needed) — ported from the
+  `torchFlicker`/`litR` radial-gradient overlay in `render()`. Both
+  `CanvasModulate` and the light only affect the base canvas, leaving
+  HUD/menu `CanvasLayer`s unaffected, matching the JS's canvas-vs-DOM split.
+- **Screen shake**: `add_shake()` (capped at 16, decaying at `dt*36`) applied
+  as random `Camera2D.offset` jitter, wired at every JS `addShake()` site —
+  enemy kills (boss vs. normal), player hurt, boss spawn, revive, exploder
+  death explosion, and miniboss/finalboss attack ticks (ported from
+  `js/enemies.js`'s `ctx.addShake`).
+- **Level-up/pickup flash** and **low-HP pulsing vignette** (transparent-
+  center-to-red `GradientTexture2D`, alpha-modulated by the JS's pulse
+  formula), both on the HUD `CanvasLayer` so they sit above the world but
+  below the DOM-equivalent HUD text.
+- **Pause + Settings**: an in-run Pause button + Escape-to-open (closing is
+  via the always-processing Resume button, since Godot's default pause
+  cascade stops `_input` once `get_tree().paused` — matching the JS's own
+  render-freeze-while-paused behavior) — Resume / Settings / **Quit to
+  Title** (ported from `quit-btn`: abandons the run with *no* gold/kills/
+  achievements persisted, unlike a completed death/victory). Settings
+  (volume slider + mute) is shared between the title screen and pause menu,
+  persisted to `GameSave` (`volume`/`muted` now round-trip through the save
+  file, matching `loadMeta`/`saveMeta`).
+- Validated headlessly: `--pausetest` exercises pause → settings → volume/
+  mute change + disk round-trip → back → resume → a second pause → quit
+  (confirming the run's gold is *not* persisted on quit). All five self-tests
+  (`selftest`/`bosstest`/`deathtest`/`audiotest`/`pausetest`) pass with no
+  script errors.
 
 ### Phase 4 — Art & ship
 - Enemy/boss sprite art (PixelLab) replacing the placeholder shapes.

@@ -20,6 +20,9 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
     title → fresh run.
   - `godot --headless --path godot -- --audiotest` — bakes + sanity-checks the
     procedural SFX PCM and exercises every sfx()/the music drone.
+  - `godot --headless --path godot -- --pausetest` — pause → settings
+    (volume/mute + disk round-trip) → back → resume → a second pause → Quit
+    to Title (confirms gold is *not* persisted on quit, unlike death/victory).
 
 ## What's in the project so far
 - **Player** (`scripts/Player.gd`) — movement, 8-direction facing, the
@@ -49,6 +52,13 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
 - **Audio** (`scripts/GameAudio.gd`, autoload) — fully procedural SFX + ambient
   music (no audio files), baked into in-memory `AudioStreamWAV`s, ported from
   `js/audio.js`'s WebAudio oscillator/noise synthesis.
+- **Lighting & juice** — a `CanvasModulate` + player-following `PointLight2D`
+  "torch" (flickering, runtime-generated gradient texture, no image asset),
+  screen shake, level-up/pickup flash, and a pulsing low-HP vignette.
+- **Pause + Settings** — in-run Pause button/Escape, Resume/Settings/Quit to
+  Title (quitting abandons the run's rewards, unlike death/victory); a shared
+  Settings screen (volume/mute) reachable from the title or pause, persisted
+  to `GameSave`.
 - **Spawn director** — ramping spawn interval, paused during the final boss.
 - **Floor** — the PixelLab dungeon-stone tile, tiled across the world.
 - **Input** — touch joystick + WASD/arrows + a movement-ability button/Space.
@@ -56,9 +66,9 @@ the App Store and Google Play** (native exports the HTML5 build can't produce).
 - **GameData** (`scripts/GameData.gd`, autoload) — class/weapon/enemy stats,
   achievements, upgrade tracks, and the animation manifest.
 
-## Not yet ported (next phases) — see ../PORTING.md
-Enemy/boss sprite art, a pause/settings screen, and torch lighting/screen
-shake. The HTML5 build in the repo root remains the reference for all of these.
+## Not yet ported (next phase) — see ../PORTING.md
+Enemy/boss sprite art and real tile-based terrain (Phase 4, alongside store
+export presets). The HTML5 build in the repo root remains the reference.
 
 ## Asset note
 `assets/` here is a copy of the repo's `../assets/`. The Godot project is the
