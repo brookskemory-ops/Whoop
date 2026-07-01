@@ -107,6 +107,8 @@ func _ready() -> void:
 		_run_pausetest()
 	elif _has_flag("--stagetest"):
 		_run_stagetest()
+	elif _has_flag("--shoptest"):
+		_run_shoptest()
 	else:
 		_show_title()
 
@@ -253,8 +255,16 @@ func _menu_base() -> VBoxContainer:
 	_menu_ui = CanvasLayer.new()
 	_menu_ui.layer = 10
 	add_child(_menu_ui)
+	# Atmospheric backdrop (dusk keep) shared by every menu, with a dark wash
+	# over it so text stays legible.
+	var bg := TextureRect.new()
+	bg.texture = load("res://assets/ui/title_bg.png")
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	bg.modulate = Color(0.55, 0.52, 0.6)
+	_menu_ui.add_child(bg)
 	var dim := ColorRect.new()
-	dim.color = UiTheme.BG; dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.055, 0.05, 0.04, 0.74); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_menu_ui.add_child(dim)
 	var scroll := ScrollContainer.new()
 	scroll.theme = _ui_theme
@@ -268,25 +278,40 @@ func _menu_base() -> VBoxContainer:
 
 func _show_title() -> void:
 	var vbox := _menu_base()
+	_add_title_embers()
+
+	var crest := TextureRect.new()
+	crest.texture = load("res://assets/ui/crest.png")
+	crest.custom_minimum_size = Vector2(0, 120)
+	crest.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	vbox.add_child(crest)
+
 	var title := Label.new(); title.text = "IRONVOW"; title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiTheme.style_title(title, 44)
+	UiTheme.style_title(title, 52)
+	title.add_theme_constant_override("shadow_offset_x", 2)
+	title.add_theme_constant_override("shadow_offset_y", 2)
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	vbox.add_child(title)
-	var tagline := Label.new(); tagline.text = "Hold the line. Forge your legend."
+	var tagline := Label.new(); tagline.text = "~ Hold the line. Forge your legend. ~"
 	tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiTheme.style_muted(tagline, 14)
 	vbox.add_child(tagline)
 	vbox.add_child(_spacer(18))
 
 	var start_btn := _make_button("New Run", true)
+	start_btn.icon = load("res://assets/ui/icon_newrun.png")
 	start_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_class_select())
 	vbox.add_child(start_btn)
-	var shop_btn := _make_button("Armory (Shop)")
+	var shop_btn := _make_button("Armory")
+	shop_btn.icon = load("res://assets/ui/icon_armory.png")
 	shop_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_shop())
 	vbox.add_child(shop_btn)
-	var ach_btn := _make_button("Deeds (Achievements)")
+	var ach_btn := _make_button("Deeds")
+	ach_btn.icon = load("res://assets/ui/icon_deeds.png")
 	ach_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_achievements())
 	vbox.add_child(ach_btn)
 	var settings_btn := _make_button("Settings")
+	settings_btn.icon = load("res://assets/ui/icon_settings.png")
 	settings_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_settings(_show_title))
 	vbox.add_child(settings_btn)
 
@@ -297,6 +322,25 @@ func _show_title() -> void:
 	UiTheme.style_muted(stats, 14)
 	vbox.add_child(stats)
 
+# Slow, sparse embers drifting up behind the title menu for ambience.
+func _add_title_embers() -> void:
+	var p := CPUParticles2D.new()
+	p.amount = 26
+	p.lifetime = 6.0
+	p.position = Vector2(240, 820)
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	p.emission_rect_extents = Vector2(240, 20)
+	p.direction = Vector2(0, -1)
+	p.spread = 18.0
+	p.gravity = Vector2(0, -8)
+	p.initial_velocity_min = 12.0
+	p.initial_velocity_max = 34.0
+	p.scale_amount_min = 1.0
+	p.scale_amount_max = 2.5
+	p.color = Color(0.95, 0.72, 0.32, 0.6)
+	p.self_modulate = Color(1, 1, 1, 0.7)
+	_menu_ui.add_child(p)
+
 func _spacer(h: int) -> Control:
 	var c := Control.new()
 	c.custom_minimum_size = Vector2(0, h)
@@ -305,7 +349,7 @@ func _spacer(h: int) -> Control:
 func _make_button(text: String, primary: bool = false) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(400, 52)
+	b.custom_minimum_size = Vector2(400, 62)
 	b.theme = _ui_theme
 	if primary:
 		b.theme_type_variation = "PrimaryButton"
@@ -329,30 +373,48 @@ func _show_class_select() -> void:
 		var accent := Color(c["color"])
 		var b := Button.new()
 		b.theme = _ui_theme
-		b.custom_minimum_size = Vector2(196, 84)
+		b.custom_minimum_size = Vector2(196, 104)
 		b.text = ""
 		UiTheme.accent_button_style(b, accent, cid == _selected_class)
 		b.pressed.connect(_pick_class.bind(cid))
 
-		var inner := VBoxContainer.new()
+		var inner := HBoxContainer.new()
 		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		inner.set_anchors_preset(Control.PRESET_FULL_RECT)
-		inner.offset_left = 14; inner.offset_top = 10
-		inner.offset_right = -14; inner.offset_bottom = -10
-		inner.add_theme_constant_override("separation", 3)
+		inner.offset_left = 10; inner.offset_top = 8
+		inner.offset_right = -10; inner.offset_bottom = -8
+		inner.add_theme_constant_override("separation", 6)
 		b.add_child(inner)
+
+		# Class portrait: the idle-facing sprite frame, so the card art matches
+		# the in-game champion exactly. Dimmed to a silhouette when locked.
+		var portrait := TextureRect.new()
+		var frame_path := "res://assets/anim/%s/idle/south/frame_000.png" % cid
+		if ResourceLoader.exists(frame_path):
+			portrait.texture = load(frame_path)
+		portrait.custom_minimum_size = Vector2(52, 0)
+		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		portrait.modulate = Color(1, 1, 1) if unlocked else Color(0.2, 0.18, 0.22, 0.9)
+		inner.add_child(portrait)
+
+		var text_col := VBoxContainer.new()
+		text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text_col.add_theme_constant_override("separation", 3)
+		inner.add_child(text_col)
 
 		var name_lbl := Label.new()
 		name_lbl.text = c["name"]
 		name_lbl.add_theme_color_override("font_color", accent if unlocked else UiTheme.MUTED)
-		name_lbl.add_theme_font_size_override("font_size", 18)
-		inner.add_child(name_lbl)
+		name_lbl.add_theme_font_override("font", UiTheme.title_font())
+		name_lbl.add_theme_font_size_override("font_size", 17)
+		text_col.add_child(name_lbl)
 
 		var blurb_lbl := Label.new()
 		blurb_lbl.text = c["blurb"] if unlocked else ("(Locked) %s" % _lock_text(c["unlock"]))
 		blurb_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-		UiTheme.style_muted(blurb_lbl, 12)
-		inner.add_child(blurb_lbl)
+		blurb_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.style_muted(blurb_lbl, 11)
+		text_col.add_child(blurb_lbl)
 
 		grid.add_child(b)
 
@@ -369,7 +431,8 @@ func _show_class_select() -> void:
 		var wun := GameSave.weapon_unlocked(wid)
 		var wb := Button.new()
 		wb.theme = _ui_theme
-		wb.custom_minimum_size = Vector2(190, 44)
+		wb.custom_minimum_size = Vector2(190, 52)
+		wb.add_theme_font_size_override("font_size", 14)
 		wb.text = w["name"] if wun else "(Locked) %s" % w["name"]
 		if wid == _selected_weapon and wun:
 			wb.theme_type_variation = "PrimaryButton"
@@ -447,6 +510,10 @@ func _show_shop() -> void:
 		UiTheme.accent_button_style(cb, Color(cdef["color"]), cid == _selected_class)
 		cb.pressed.connect(func(): GameAudio.sfx("uiClick"); _selected_class = cid; _show_shop())
 		class_row.add_child(cb)
+	var scope_lbl := Label.new()
+	scope_lbl.text = "Upgrades below apply to the %s only." % GameData.CLASSES[_selected_class]["name"]
+	UiTheme.style_muted(scope_lbl, 12)
+	vbox.add_child(scope_lbl)
 	vbox.add_child(_spacer(6))
 	for t in GameData.UPGRADE_TRACKS:
 		var id: String = t["id"]
@@ -454,8 +521,9 @@ func _show_shop() -> void:
 		var maxed: bool = lvl >= int(t["max"])
 		var cost := GameData.upgrade_cost(id, lvl)
 		var row := _make_button("")
-		row.custom_minimum_size = Vector2(400, 56)
+		row.custom_minimum_size = Vector2(400, 70)
 		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.add_theme_font_size_override("font_size", 15)
 		row.disabled = maxed or GameSave.gold < cost
 		row.text = "%s   Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("MAX" if maxed else "%d gold" % cost)]
 		row.pressed.connect(_buy_upgrade.bind(id))
@@ -1444,6 +1512,29 @@ func _run_audiotest() -> void:
 
 	print("[AUDIOTEST] peak=%.4f rms=%.6f nonsilent=%s in_range=%s drone_ok=%s" % [
 		peak, rms, str(peak > 0.001), str(peak <= 1.0), str(drone_ok)])
+	get_tree().quit(0)
+
+# Verifies per-class upgrade independence: buying an upgrade for one class must
+# not leak into another (regression guard for the old migration that seeded
+# every class identically and made the shop look like it applied to all).
+func _run_shoptest() -> void:
+	GameSave.class_upgrades = {}
+	GameSave.set_class_upgrade("knight", "vigor", 3)   # +3 * 20 = +60 max HP
+	var kn := Player.new(); kn.setup("knight", "")
+	var ar := Player.new(); ar.setup("archer", "")
+	var kn_base: float = GameData.CLASSES["knight"]["max_hp"]
+	var ar_base: float = GameData.CLASSES["archer"]["max_hp"]
+	var kn_hp := kn.max_hp
+	var ar_hp := ar.max_hp
+	kn.free(); ar.free()
+	var knight_boosted := is_equal_approx(kn_hp, kn_base + 60.0)
+	var archer_unaffected := is_equal_approx(ar_hp, ar_base)
+	# A save with no per-class data must not cross-seed classes on load.
+	GameSave.class_upgrades = {}
+	GameSave.load_data()
+	var no_cross_seed := GameSave.class_upgrades.is_empty()
+	print("[SHOPTEST] knight_hp=%.0f(base %.0f) archer_hp=%.0f(base %.0f) knight_boosted=%s archer_unaffected=%s no_cross_seed=%s" % [
+		kn_hp, kn_base, ar_hp, ar_base, str(knight_boosted), str(archer_unaffected), str(no_cross_seed)])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,
