@@ -12,7 +12,6 @@ var unlocked_weapons := {}
 var achievements := {}
 var total_kills := 0
 var class_kills := {}
-var upgrades := {}          # legacy flat dict — kept only as a migration source, see load_data()
 var volume := 0.7
 var muted := false
 
@@ -37,7 +36,6 @@ func load_data() -> void:
 	achievements = {}
 	total_kills = 0
 	class_kills = {}
-	upgrades = {"vigor": 0, "might": 0, "haste": 0, "fortune": 0, "revive": 0}
 	volume = 0.7
 	muted = false
 	stage_clears = {}
@@ -56,32 +54,17 @@ func load_data() -> void:
 			achievements = parsed.get("achievements", achievements)
 			total_kills = parsed.get("total_kills", 0)
 			class_kills = parsed.get("class_kills", class_kills)
-			var u: Dictionary = parsed.get("upgrades", {})
-			for k in upgrades:
-				if u.has(k):
-					upgrades[k] = u[k]
 			volume = float(parsed.get("volume", 0.7))
 			muted = bool(parsed.get("muted", false))
 			stage_clears = parsed.get("stage_clears", {})
 			unlocked_tier = parsed.get("unlocked_tier", "tier1")
 			class_upgrades = parsed.get("class_upgrades", {})
 
-	# One-time migration: older saves only ever had the flat global `upgrades`
-	# dict. If this save predates class_upgrades and the player had actually
-	# bought anything, seed every class with those same levels once — there's
-	# no way to reconstruct a "real" per-class split from flat data, so
-	# giving everyone the same starting point is the least-bad option and
-	# never wipes existing progress.
-	if class_upgrades.is_empty():
-		var had_any := false
-		for k in upgrades:
-			if int(upgrades[k]) > 0:
-				had_any = true
-				break
-		if had_any:
-			for cid in GameData.CLASSES:
-				class_upgrades[cid] = upgrades.duplicate()
-
+	# Permanent upgrades are strictly per-class (GameSave.class_upgrades keyed by
+	# class id). There is deliberately NO cross-class seeding: buying Vigor for
+	# the Knight must never touch the Archer's track. (An earlier build migrated
+	# a legacy flat `upgrades` dict by copying it onto every class, which made
+	# the per-class shop look like it applied to all — that field is now gone.)
 	for id in GameData.CLASSES:
 		if GameData.CLASSES[id]["unlock"]["type"] == "default":
 			unlocked_classes[id] = true
@@ -97,7 +80,7 @@ func save_data() -> void:
 		"gold": gold, "best_time": best_time,
 		"unlocked_classes": unlocked_classes, "unlocked_weapons": unlocked_weapons,
 		"achievements": achievements, "total_kills": total_kills,
-		"class_kills": class_kills, "upgrades": upgrades,
+		"class_kills": class_kills,
 		"volume": volume, "muted": muted,
 		"stage_clears": stage_clears, "unlocked_tier": unlocked_tier,
 		"class_upgrades": class_upgrades,
