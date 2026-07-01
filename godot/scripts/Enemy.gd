@@ -31,6 +31,11 @@ var _atk := 0.0
 var _phase := 0.0
 var _ap := 0
 
+var _art_key := ""
+var _spr: Sprite2D
+var _tex_cache := {}
+var _dir := "south"
+
 func setup(key: String, scale_mult: float) -> void:
 	var b: Dictionary = GameData.ENEMY_BASE[key]
 	kind = b["kind"]
@@ -45,6 +50,12 @@ func setup(key: String, scale_mult: float) -> void:
 	is_boss = b.get("boss", false)
 	is_final = b.get("final", false)
 	add_to_group("enemies")
+	if GameData.MOB_ART.has(key):
+		_art_key = key
+		_spr = Sprite2D.new()
+		_spr.scale = Vector2.ONE * float(GameData.MOB_SPRITE_SCALE.get(key, 1.0))
+		add_child(_spr)
+		_set_dir("south")
 
 func _physics_process(delta: float) -> void:
 	var main := get_tree().current_scene
@@ -59,9 +70,12 @@ func _physics_process(delta: float) -> void:
 	var slow := 0.5 if slow_until > main.elapsed else 1.0
 	var dir := Vector2(cos(a), sin(a))
 
+	if _art_key != "":
+		_set_dir(GameData.dir_of(a))
+		_spr.modulate = Color(1, 1, 1).lerp(Color(4.0, 4.0, 4.0), minf(1.0, _hit_flash * 8.0))
 	if _hit_flash > 0.0:
 		_hit_flash -= delta
-		queue_redraw()
+	queue_redraw()
 	if burn_until > main.elapsed and burn_dps > 0.0:
 		# Burn ticks bypass take_damage()'s sfx/hit-flash (ported from the direct
 		# `e.hp -= e.burn.dps * dt` in js/game.js, not damageEnemy()).
@@ -157,10 +171,15 @@ func _die() -> void:
 		return
 	GameAudio.sfx("enemyDie")
 	main.add_shake(6.0 if is_boss else 1.5)
+	var world: Node = main.get_node("World")
+	Vfx.burst(world, global_position, color, 22 if is_boss else 9, 90.0 if is_boss else 150.0, 0.6 if is_boss else 0.35, 5.0 if is_boss else 3.0)
+	if is_boss:
+		Vfx.ring(world, global_position, color, radius * 2.2, 0.5)
 	# Death effects (onEnemyDeath in js/enemies.js).
 	if kind == "exploder":
 		main.hurt_area(global_position, 64.0, dmg)
 		main.add_shake(4.0)
+		Vfx.burst(world, global_position, Color("ffb066"), 26, 260.0, 0.45, 4.0)
 	elif kind == "splitter":
 		for i in 3:
 			var ang := (float(i) / 3.0) * TAU
@@ -179,12 +198,22 @@ func _die() -> void:
 	main.get_node("World").add_child(gem)
 	queue_free()
 
+func _set_dir(d: String) -> void:
+	if d == _dir and _spr.texture != null:
+		return
+	_dir = d
+	if not _tex_cache.has(d):
+		var p := "res://assets/mobs/%s/%s.png" % [_art_key, d]
+		_tex_cache[d] = load(p) if ResourceLoader.exists(p) else null
+	_spr.texture = _tex_cache[d]
+
 func _draw() -> void:
-	draw_circle(Vector2.ZERO, radius, color)
-	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 24, Color("2a2622"), 2.0)
+	if _art_key == "":
+		draw_circle(Vector2.ZERO, radius, color)
+		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 24, Color("2a2622"), 2.0)
+		if _hit_flash > 0.0:
+			draw_circle(Vector2.ZERO, radius, Color(1, 1, 1, _hit_flash * 6.0))
 	if elite:
 		draw_arc(Vector2.ZERO, radius + 4.0, 0.0, TAU, 24, Color(1.0, 0.82, 0.35, 0.85), 2.0)
 	if telegraph:
 		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 24, Color(1.0, 0.31, 0.24, 0.9), 3.0)
-	if _hit_flash > 0.0:
-		draw_circle(Vector2.ZERO, radius, Color(1, 1, 1, _hit_flash * 6.0))

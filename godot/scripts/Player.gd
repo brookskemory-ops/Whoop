@@ -7,7 +7,7 @@ extends CharacterBody2D
 signal died
 signal leveled_up
 
-const SPRITE_SCALE := 0.6
+const SPRITE_SCALE := 1.5
 
 var cls_id := "knight"
 var max_hp := 140.0

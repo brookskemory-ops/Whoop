@@ -1,17 +1,30 @@
 extends Node2D
 ## XP/gold pickup. Drifts toward the player within pickup range, then is
-## collected on contact.
+## collected on contact. Rendered as the PixelLab arcane-gem icon with a
+## gentle bob + spin so it reads clearly against the floor tiles.
 
 const PICKUP_RANGE := 75.0
 var _xp := 1.0
 var _gold := 1.0
 var radius := 5.0
+var _t := randf() * TAU
+var _spr: Sprite2D
 
 func setup(pos: Vector2, xp: float, gold: float) -> void:
 	global_position = pos
 	_xp = xp; _gold = gold
 
+func _ready() -> void:
+	_spr = Sprite2D.new()
+	_spr.texture = load("res://assets/items/gem.png")
+	_spr.scale = Vector2.ONE * 0.9
+	add_child(_spr)
+
 func _process(delta: float) -> void:
+	_t += delta
+	_spr.position.y = sin(_t * 3.0) * 3.0
+	_spr.scale.x = 0.9 * (0.8 + 0.2 * cos(_t * 2.2))
+
 	var players := get_tree().get_nodes_in_group("player")
 	if players.is_empty():
 		return
@@ -26,7 +39,5 @@ func _process(delta: float) -> void:
 		if main and main.has_method("add_gold"):
 			main.add_gold(_gold * player.fortune_gold)
 		GameAudio.sfx("pickup")
+		Vfx.burst(get_parent(), global_position, Color("4ad6e8"), 6, 110.0, 0.25, 2.0)
 		queue_free()
-
-func _draw() -> void:
-	draw_circle(Vector2.ZERO, radius, Color("4ad6e8"))

@@ -140,6 +140,16 @@ const ENEMY_BASE := {
 
 const DIR8 := ["east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"]
 
+# Mobs with PixelLab rotation art at assets/mobs/<kind>/<dir>.png (static 8-dir
+# poses, no walk cycle). Scale tuned per-mob so the on-screen size tracks each
+# archetype's collision radius (see ENEMY_BASE) at roughly the same visual
+# weight as the player's SPRITE_SCALE.
+const MOB_ART := ["skeleton", "goblin", "ogre", "shooter", "exploder", "splitter", "charger", "spawnling", "miniboss", "finalboss"]
+const MOB_SPRITE_SCALE := {
+	"skeleton": 1.05, "goblin": 0.95, "ogre": 1.0, "shooter": 1.1, "exploder": 1.05,
+	"splitter": 1.0, "charger": 1.05, "spawnling": 1.2, "miniboss": 1.1, "finalboss": 1.35,
+}
+
 static func dir_of(angle: float) -> String:
 	var i := int(round(angle / (PI / 4.0)))
 	i = ((i % 8) + 8) % 8
