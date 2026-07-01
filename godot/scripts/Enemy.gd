@@ -18,6 +18,8 @@ var elite := false
 var slow_until := 0.0
 var burn_dps := 0.0
 var burn_until := 0.0
+var marked_until := 0.0
+var marked_mult := 1.0
 var facing := 0.0
 var telegraph := false
 var _hit_flash := 0.0
@@ -158,7 +160,9 @@ func apply_burn(dps: float, seconds: float) -> void:
 	if main: burn_dps = dps; burn_until = main.elapsed + seconds
 
 func take_damage(amount: float, crit: bool = false) -> void:
-	hp -= amount
+	var main := get_tree().current_scene
+	var mult := marked_mult if (main and marked_until > main.elapsed) else 1.0
+	hp -= amount * mult
 	_hit_flash = 0.1
 	queue_redraw()
 	GameAudio.sfx("crit" if crit else "hit")
