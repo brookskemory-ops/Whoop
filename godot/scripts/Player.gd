@@ -36,6 +36,20 @@ var orbit_groups: Array = []
 var skills: Array = []          # active abilities: {id, rank, timer}
 var dash = null                 # {vel, time, hit_mult, hits}
 
+# Shield pool shared by Knight's Bulwark Stance (burst refresh, no passive
+# regen) and Mage's Mana Shield (passive, regenerates via shield_regen).
+var shield := 0.0
+var shield_max := 0.0
+var shield_regen := 0.0
+
+# Archer's Eagle Eye: standing still stacks bonus crit chance (added
+# straight into `crit`), reset the moment the player moves.
+var focus_rank := 0
+var focus_max_stacks := 0
+var focus_step := 0.0
+var _focus_timer := 0.0
+var _focus_bonus := 0.0
+
 var move_dir := Vector2.ZERO          # set each frame by Main (joystick + keys)
 var facing := 0.0
 var moving := false
@@ -122,6 +136,21 @@ func _physics_process(delta: float) -> void:
 		hp = min(max_hp, hp + regen * delta)
 	if invuln > 0.0:
 		invuln -= delta
+	if shield_max > 0.0 and shield < shield_max:
+		shield = minf(shield_max, shield + shield_regen * delta)
+
+	if focus_rank > 0:
+		if moving:
+			if _focus_bonus > 0.0:
+				crit -= _focus_bonus
+				_focus_bonus = 0.0
+			_focus_timer = 0.0
+		else:
+			_focus_timer += delta
+			var target_bonus: float = minf(focus_max_stacks, floor(_focus_timer)) * focus_step
+			if target_bonus != _focus_bonus:
+				crit += target_bonus - _focus_bonus
+				_focus_bonus = target_bonus
 
 	# Class weapon (orbital weapons fire continuously via the orbital tick).
 	if weapon_type != "orbital":
@@ -181,6 +210,8 @@ func apply_pick(option: Dictionary) -> void:
 	inst["rank"] = option["next_rank"]
 	if Abilities.kind_of(def) == "orbit":
 		Abilities.sync_orbit(def, self, inst["rank"])
+	elif Abilities.kind_of(def) == "passive":
+		Abilities.apply_passive(def, self, inst["rank"])
 
 func sync_orbit_group(key: String, count: int, mult: float, dist: float, speed: float, r: float, col: Color) -> void:
 	for g in orbit_groups:
@@ -221,7 +252,12 @@ func _tick_orbitals(delta: float, main: Node) -> void:
 func take_damage(amount: float) -> void:
 	if invuln > 0.0:
 		return
-	hp -= amount
+	var dmg := amount
+	if shield > 0.0:
+		var absorb := minf(shield, dmg)
+		shield -= absorb
+		dmg -= absorb
+	hp -= dmg
 	invuln = 0.6
 	_hurt_t = 0.3
 	var main := get_tree().current_scene

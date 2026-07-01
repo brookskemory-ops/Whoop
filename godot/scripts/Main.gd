@@ -734,7 +734,13 @@ func dir_to_nearest(pos: Vector2) -> float:
 	return (t.global_position - pos).angle() if t != null else randf() * TAU
 
 func area_damage(center: Vector2, radius: float, mult: float, opts: Dictionary) -> void:
-	var dmg: float = _player.damage * mult
+	area_damage_amount(center, radius, _player.damage * mult, opts)
+
+## Same as area_damage() but takes an absolute damage amount instead of a
+## multiplier on the player's damage stat — used by abilities that deal
+## damage from a spawned object (traps, zones, telegraphed strikes) where
+## the amount was already computed at cast time.
+func area_damage_amount(center: Vector2, radius: float, dmg: float, opts: Dictionary) -> void:
 	var crit: bool = opts.get("crit", false)
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var off: Vector2 = e.global_position - center
@@ -742,10 +748,71 @@ func area_damage(center: Vector2, radius: float, mult: float, opts: Dictionary) 
 			e.take_damage(dmg, crit)
 			if opts.has("slow"):
 				e.apply_slow(opts["slow"])
+			if opts.has("burn_dps"):
+				e.apply_burn(opts["burn_dps"], opts.get("burn_time", 2.0))
 			if opts.has("knockback"):
 				var d := off.length()
 				if d > 0.0:
 					e.global_position += off / d * opts["knockback"] * 0.06
+
+## Instant line hitscan (Knight's Spear Impale, Mage's Arcane Beam) — damages
+## every foe within `width`/2 of the segment from origin along dir for length.
+func line_damage(origin: Vector2, dir: Vector2, length: float, width: float, dmg: float, opts: Dictionary) -> void:
+	var d := dir.normalized()
+	var crit: bool = opts.get("crit", false)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var off: Vector2 = e.global_position - origin
+		var along := off.dot(d)
+		if along < -e.radius or along > length + e.radius:
+			continue
+		var perp := (off - d * along).length()
+		if perp <= width * 0.5 + e.radius:
+			e.take_damage(dmg, crit)
+			if opts.has("slow"):
+				e.apply_slow(opts["slow"])
+	if opts.has("color"):
+		var world := get_node("World")
+		Vfx.chain_link(world, origin, origin + d * length, opts["color"], opts.get("vfx_width", 4.0), 0.15)
+
+## Knight's Taunt Roar — pulls nearby foes toward origin and marks them so
+## all subsequent damage they take (from anything) is multiplied.
+func pull_and_mark(origin: Vector2, radius: float, pull_speed: float, mark_mult: float, mark_dur: float) -> void:
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var off: Vector2 = origin - e.global_position
+		var d := off.length()
+		if d <= radius and d > 4.0:
+			e.global_position += off / d * pull_speed * 0.06
+		if d <= radius:
+			e.marked_until = elapsed + mark_dur
+			e.marked_mult = mark_mult
+
+func spawn_trap(pos: Vector2, trigger_radius: float, blast_radius: float, dmg: float, color: Color) -> void:
+	var t := preload("res://scripts/TrapMine.gd").new()
+	t.global_position = pos
+	t.trigger_radius = trigger_radius; t.blast_radius = blast_radius; t.dmg = dmg; t.color = color
+	_world.add_child(t)
+
+func spawn_zone(pos: Vector2, radius: float, dps: float, duration: float, color: Color) -> void:
+	var z := preload("res://scripts/DamageZone.gd").new()
+	z.global_position = pos
+	z.radius = radius; z.dps = dps; z.duration = duration; z.color = color
+	_world.add_child(z)
+
+func spawn_homing(pos: Vector2, dir: Vector2, speed: float, dmg: float, crit: bool, r: float, color: Color, slow: float = 0.0) -> void:
+	var h := preload("res://scripts/HomingProjectile.gd").new()
+	h.setup(pos, dir, speed, dmg, crit, r, color, slow)
+	_world.add_child(h)
+
+func spawn_bounce(pos: Vector2, vel: Vector2, dmg: float, crit: bool, bounces: int, r: float, color: Color) -> void:
+	var b := preload("res://scripts/BounceProjectile.gd").new()
+	b.setup(pos, vel, dmg, crit, bounces, r, color)
+	_world.add_child(b)
+
+func spawn_telegraph(pos: Vector2, radius: float, dmg: float, delay: float, color: Color) -> void:
+	var s := preload("res://scripts/TelegraphStrike.gd").new()
+	s.global_position = pos
+	s.radius = radius; s.dmg = dmg; s.delay = delay; s.color = color
+	_world.add_child(s)
 
 func spawn_player_projectile(pos: Vector2, vel: Vector2, dmg: float, crit: bool, pierce: int, r: float, col: Color, on_hit := Callable()) -> void:
 	var pr := preload("res://scripts/Projectile.gd").new()
@@ -822,7 +889,7 @@ func _build_level_cards(opts: Array) -> void:
 		b.add_child(row)
 
 		var icon := TextureRect.new()
-		var icon_path := "res://assets/icons/abilities/%s.png" % def["mech"]
+		var icon_path := "res://assets/icons/abilities/%s.png" % def.get("icon_key", def["mech"])
 		if ResourceLoader.exists(icon_path):
 			icon.texture = load(icon_path)
 		icon.modulate = Color(def["color"])
@@ -1117,8 +1184,11 @@ func _run_selftest() -> void:
 	# Force one of every archetype so all AI branches run at least once.
 	for key in ["shooter", "exploder", "splitter", "charger", "ogre", "miniboss", "finalboss"]:
 		add_enemy(key, _player.global_position + Vector2(randf_range(-180, 180), randf_range(-180, 180)), 1.0)
-	# Grant one ability per mechanic so every activate() branch runs.
-	for aid in ["kn_bash", "kn_slam", "kn_spears", "ar_scatter", "mg_chain", "kn_whirl", "kn_charge", "mg_blink"]:
+	# Grant every Knight/Archer/Mage ability so all activate() branches run
+	# (abilities are class-agnostic in code — any def works on any player).
+	for aid in ["kn_bash", "kn_slam", "kn_lance", "kn_taunt", "kn_barrier", "kn_whirl", "kn_charge", "kn_step",
+			"ar_multi", "ar_snipe", "ar_trap", "ar_mark", "ar_bombard", "ar_ricochet", "ar_retreat", "ar_focus",
+			"mg_firenova", "mg_meteor", "mg_cinder", "mg_frostbolt", "mg_chain", "mg_beam", "mg_surge", "mg_shield"]:
 		_player.apply_pick({"ability": Abilities.by_id(aid), "next_rank": 1, "is_new": true})
 	# Fire every weapon once so all four patterns (melee/projectile/nova/orbital) run.
 	for wid in GameData.WEAPON_META:
