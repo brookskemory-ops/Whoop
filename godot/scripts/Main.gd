@@ -19,8 +19,12 @@ var _spawn_timer := 0.0
 var _state := "playing"   # playing | dead | won
 
 var _world: Node2D
+var _stage_root: Node2D
 var _player: Player
 var _camera: Camera2D
+var _active_stage: Dictionary
+var _active_tier: Dictionary
+var _obstacles: Array = []   # [{"pos": Vector2, "radius": float}, ...] for the active stage
 
 # Boss timeline (ported from spawnBoss/MINI_TIMES/WIN_TIME in js/game.js)
 var _boss: Node = null
@@ -101,6 +105,8 @@ func _ready() -> void:
 	elif _has_flag("--pausetest"):
 		_begin_run(DEFAULT_TEST_CLASS, "")
 		_run_pausetest()
+	elif _has_flag("--stagetest"):
+		_run_stagetest()
 	else:
 		_show_title()
 
@@ -112,15 +118,46 @@ func _build_world() -> void:
 	_world.name = "World"
 	add_child(_world)
 
-	# Floor: one huge repeating Sprite2D using the PixelLab dungeon-stone tile.
-	var floor_spr := Sprite2D.new()
-	floor_spr.texture = load("res://assets/map/floor.png")
-	floor_spr.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
-	floor_spr.region_enabled = true
-	floor_spr.region_rect = Rect2(-500000, -500000, 1000000, 1000000)
-	floor_spr.scale = Vector2(2, 2)
-	floor_spr.z_index = -100
-	_world.add_child(floor_spr)
+# Rebuilds the bounded, stage-themed ground + scattered obstacles for a run.
+# _stage_root is managed explicitly here (not by _clear_run()'s generic
+# has-a-script sweep) so the map persists across the run and only resets
+# when a new run actually begins.
+func _rebuild_stage(stage: Dictionary) -> void:
+	if _stage_root:
+		_stage_root.queue_free()
+	_stage_root = Node2D.new()
+	_stage_root.name = "Stage"
+	_world.add_child(_stage_root)
+
+	var map_builder := preload("res://scripts/MapBuilder.gd")
+	var ground: TileMap = map_builder.build_ground(stage)
+	_stage_root.add_child(ground)
+
+	var textures: Array = []
+	for path in stage["obstacle_textures"]:
+		textures.append(load(path))
+	_obstacles = map_builder.scatter_obstacles(_stage_root, stage, textures)
+
+# Clamps a candidate spawn position inside the active stage's bounds and,
+# if it lands inside an obstacle, resamples the angle a few times before
+# giving up and returning the clamped-but-possibly-overlapping position.
+func _find_spawn_pos(origin: Vector2, dist: float) -> Vector2:
+	var half: Vector2 = _active_stage.get("bounds", Vector2(100000, 100000)) * 0.5 - Vector2(80, 80)
+	var pos := Vector2.ZERO
+	for i in 8:
+		var ang := randf() * TAU
+		pos = origin + Vector2(cos(ang), sin(ang)) * dist
+		pos.x = clampf(pos.x, -half.x, half.x)
+		pos.y = clampf(pos.y, -half.y, half.y)
+		if not _pos_blocked(pos):
+			break
+	return pos
+
+func _pos_blocked(pos: Vector2) -> bool:
+	for o in _obstacles:
+		if pos.distance_to(o["pos"]) < o["radius"] + 24.0:
+			return true
+	return false
 
 func _make_radial_gradient_texture(size: Vector2, c0: Color, c1: Color) -> GradientTexture2D:
 	return _make_multistop_gradient_texture(size, [0.0, 1.0], [c0, c1], 0.5)
@@ -147,9 +184,17 @@ func _make_multistop_gradient_texture(size: Vector2, offsets: Array, colors: Arr
 func add_shake(n: float) -> void:
 	_shake = minf(16.0, _shake + n)
 
-func _begin_run(class_id: String, weapon_id: String) -> void:
+func _begin_run(class_id: String, weapon_id: String, stage_id: String = "forest", tier_id: String = "tier1") -> void:
 	_clear_menu()
 	_clear_run()
+
+	_active_stage = GameData.stage_by_id(stage_id)
+	if _active_stage.is_empty():
+		_active_stage = GameData.STAGES[0]
+	_active_tier = GameData.difficulty_by_id(tier_id)
+	if _active_tier.is_empty():
+		_active_tier = GameData.DIFFICULTIES[0]
+	_rebuild_stage(_active_stage)
 
 	_player = Player.new()
 	_player.setup(class_id, weapon_id)
@@ -159,6 +204,9 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 
 	_camera = Camera2D.new()
 	_camera.position_smoothing_enabled = false   # instant 1:1 follow, matching js/game.js's camX/camY
+	var half: Vector2 = _active_stage["bounds"] * 0.5
+	_camera.limit_left = int(-half.x); _camera.limit_right = int(half.x)
+	_camera.limit_top = int(-half.y); _camera.limit_bottom = int(half.y)
 	_player.add_child(_camera)
 	_camera.make_current()
 
@@ -176,8 +224,10 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	GameAudio.start_music()
 
 func _clear_run() -> void:
-	# Free everything spawned during the run (player/enemies/gems/projectiles),
-	# but leave the floor (a plain, scriptless Sprite2D) in place.
+	# Free everything spawned during the run (player/enemies/gems/projectiles).
+	# _stage_root (the ground TileMap + obstacles) is a plain, scriptless
+	# Node2D so this sweep leaves it alone — it's rebuilt explicitly by
+	# _rebuild_stage() at the start of the next _begin_run().
 	if _world:
 		for c in _world.get_children():
 			if c.get_script() != null:
@@ -681,9 +731,8 @@ func _update_visuals(delta: float) -> void:
 		_vignette.modulate.a = 0.0
 
 func spawn_boss(key: String) -> void:
-	var ang := randf() * TAU
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.55 + 60.0
-	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
+	var pos := _find_spawn_pos(_player.global_position, dist)
 	_boss = add_enemy(key, pos, 1.0 + (elapsed / 60.0) * 0.06)
 	_flash = 0.6
 	add_shake(8.0)
@@ -707,9 +756,8 @@ func on_boss_killed(e: Node) -> void:
 func _spawn_enemy() -> void:
 	var m := elapsed / 60.0
 	var key := _weighted_archetype(m)
-	var ang := randf() * TAU
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6 + 40.0
-	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
+	var pos := _find_spawn_pos(_player.global_position, dist)
 	var e: Node = add_enemy(key, pos, 1.0 + m * 0.25)
 	# Occasional elite (ported from js/game.js spawnEnemy). Softened: starts
 	# later (1.5min vs 1min) and less often (4.5% vs 6%).
@@ -1380,6 +1428,29 @@ func _run_audiotest() -> void:
 
 	print("[AUDIOTEST] peak=%.4f rms=%.6f nonsilent=%s in_range=%s drone_ok=%s" % [
 		peak, rms, str(peak > 0.001), str(peak <= 1.0), str(drone_ok)])
+	get_tree().quit(0)
+
+# Verifies each stage's bounded arena: camera limits match stage bounds,
+# obstacles were scattered, and sampled spawn positions land inside bounds
+# and (mostly) clear of obstacles.
+func _run_stagetest() -> void:
+	for stage in GameData.STAGES:
+		_begin_run(DEFAULT_TEST_CLASS, "", stage["id"], "tier1")
+		await get_tree().process_frame
+		var half: Vector2 = stage["bounds"] * 0.5
+		var limits_ok := _camera.limit_left == int(-half.x) and _camera.limit_right == int(half.x) \
+			and _camera.limit_top == int(-half.y) and _camera.limit_bottom == int(half.y)
+		var ground_ok := _stage_root != null and _stage_root.get_child_count() > 0
+		var spawn_in_bounds := true
+		var spawn_clear := true
+		for i in 30:
+			var pos := _find_spawn_pos(_player.global_position, 400.0)
+			if absf(pos.x) > half.x + 1.0 or absf(pos.y) > half.y + 1.0:
+				spawn_in_bounds = false
+			if _pos_blocked(pos):
+				spawn_clear = false
+		print("[STAGETEST] stage=%s limits_ok=%s ground_ok=%s obstacles=%d spawn_in_bounds=%s spawn_clear=%s" % [
+			stage["id"], str(limits_ok), str(ground_ok), _obstacles.size(), str(spawn_in_bounds), str(spawn_clear)])
 	get_tree().quit(0)
 
 # Verifies pause -> settings (volume/mute, persisted) -> back -> resume, then
