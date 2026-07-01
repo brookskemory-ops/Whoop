@@ -134,6 +134,9 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			if def.has("slow"): opts["slow"] = def["slow"]
 			if def.has("knock"): opts["knockback"] = def["knock"]
 			main.area_damage(player.global_position, rad, mult, opts)
+			var world := main.get_node("World")
+			Vfx.ring(world, player.global_position, col, rad, 0.35)
+			Vfx.burst(world, player.global_position, col, 10, 140.0, 0.3, 3.0)
 			if def.has("heal"): player.hp = min(player.max_hp, player.hp + def["heal"])
 		"slam":
 			var t: Node2D = main.nearest_enemy_to(player.global_position)
@@ -144,6 +147,9 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			if def.has("slow"): opts["slow"] = def["slow"]
 			if def.has("knock"): opts["knockback"] = def["knock"]
 			main.area_damage(t.global_position, rad, mult, opts)
+			var world := main.get_node("World")
+			Vfx.ring(world, t.global_position, col, rad, 0.35)
+			Vfx.burst(world, t.global_position, col, 12, 160.0, 0.3, 3.0)
 		"volley":
 			var base: float = main.dir_to_nearest(player.global_position)
 			var n: int = def["count"] + def.get("count_step", 1) * (rank - 1)
@@ -169,7 +175,9 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 					if d < bd: bd = d; best = e
 				if best == null: break
 				seen[best.get_instance_id()] = true
+				Vfx.chain_link(main.get_node("World"), from, best.global_position, col, 2.5, 0.25)
 				best.take_damage(player.damage * def.get("dmg", 1.1), false)
+				Vfx.burst(main.get_node("World"), best.global_position, col, 5, 90.0, 0.2, 2.0)
 				from = best.global_position
 		"dash":
 			var dist: float = def["dist"] + def.get("dist_step", 0.0) * (rank - 1)
@@ -179,6 +187,7 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 				d = Vector2(cos(a), sin(a))
 			var hit_mult: float = def.get("dmg", 0.0)
 			if def.has("dmg"): hit_mult = def["dmg"] + def.get("dmg_step", 0.0) * (rank - 1)
+			Vfx.burst(main.get_node("World"), player.global_position, col, 8, 60.0, 0.25, 2.5)
 			player.start_dash(d.normalized(), dist, hit_mult)
 		"blink":
 			var dist: float = def["dist"] + def.get("dist_step", 0.0) * (rank - 1)
@@ -187,7 +196,10 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			if t != null: a = (player.global_position - t.global_position).angle()
 			elif player.move_dir.length() > 0.01: a = player.move_dir.angle()
 			else: a = randf() * TAU
+			var world := main.get_node("World")
+			Vfx.ring(world, player.global_position, col, 40.0, 0.3)
 			player.global_position += Vector2(cos(a), sin(a)) * dist
+			Vfx.ring(world, player.global_position, col, 40.0, 0.3)
 			player.invuln = maxf(player.invuln, 0.4)
 
 # Roll n level-up options: each is NEW (rank 1) or a RANK-UP of an owned ability.

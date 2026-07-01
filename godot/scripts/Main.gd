@@ -808,14 +808,42 @@ func _build_level_cards(opts: Array) -> void:
 		var def: Dictionary = opt["ability"]
 		var b := Button.new()
 		b.theme = _ui_theme
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD
-		var tag := "NEW" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
-		b.text = "%s  [%s]\n%s" % [def["name"], tag, Abilities.describe(def, opt["next_rank"])]
-		b.custom_minimum_size = Vector2(330, 64)
+		b.text = ""
+		b.custom_minimum_size = Vector2(330, 68)
 		UiTheme.accent_button_style(b, UiTheme.GOLD if opt["is_new"] else UiTheme.XP_COLOR, false)
 		b.pressed.connect(_pick_ability.bind(opt))
 		vbox.add_child(b)
+
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.set_anchors_preset(Control.PRESET_FULL_RECT)
+		row.offset_left = 12; row.offset_top = 8; row.offset_right = -12; row.offset_bottom = -8
+		row.add_theme_constant_override("separation", 10)
+		b.add_child(row)
+
+		var icon := TextureRect.new()
+		var icon_path := "res://assets/icons/abilities/%s.png" % def["mech"]
+		if ResourceLoader.exists(icon_path):
+			icon.texture = load(icon_path)
+		icon.modulate = Color(def["color"])
+		icon.custom_minimum_size = Vector2(36, 36)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(icon)
+
+		var text_col := VBoxContainer.new()
+		text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(text_col)
+		var tag := "NEW" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
+		var name_lbl := Label.new()
+		name_lbl.text = "%s  [%s]" % [def["name"], tag]
+		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		UiTheme.style_heading(name_lbl, UiTheme.GOLD_BRIGHT if opt["is_new"] else UiTheme.XP_COLOR, 15)
+		text_col.add_child(name_lbl)
+		var desc_lbl := Label.new()
+		desc_lbl.text = Abilities.describe(def, opt["next_rank"])
+		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		UiTheme.style_muted(desc_lbl, 12)
+		text_col.add_child(desc_lbl)
 
 func _pick_ability(opt: Dictionary) -> void:
 	GameAudio.sfx("uiClick")
