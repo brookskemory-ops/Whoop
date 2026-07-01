@@ -38,4 +38,6 @@ func _process(delta: float) -> void:
 				return
 
 func _draw() -> void:
+	draw_circle(Vector2.ZERO, radius * 2.0, Color(_color.r, _color.g, _color.b, 0.25))
 	draw_circle(Vector2.ZERO, radius, _color)
+	draw_circle(Vector2.ZERO, radius * 0.4, Color(1, 1, 1, 0.85))

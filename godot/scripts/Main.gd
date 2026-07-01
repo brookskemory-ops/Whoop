@@ -347,10 +347,18 @@ func _show_shop() -> void:
 	var hdr := Label.new(); hdr.text = "Armory"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiTheme.style_title(hdr, 22)
 	vbox.add_child(hdr)
+	var gold_row := HBoxContainer.new()
+	gold_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	gold_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(gold_row)
+	var coin_icon := TextureRect.new()
+	coin_icon.texture = load("res://assets/items/coin.png")
+	coin_icon.custom_minimum_size = Vector2(18, 18)
+	coin_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	gold_row.add_child(coin_icon)
 	var gold_lbl := Label.new(); gold_lbl.text = "Gold: %d" % GameSave.gold
-	gold_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiTheme.style_heading(gold_lbl, UiTheme.GOLD_BRIGHT, 16)
-	vbox.add_child(gold_lbl)
+	gold_row.add_child(gold_lbl)
 	vbox.add_child(_spacer(8))
 
 	var upg_hdr := Label.new(); upg_hdr.text = "PERMANENT UPGRADES"
@@ -651,6 +659,7 @@ func spawn_boss(key: String) -> void:
 	_flash = 0.6
 	add_shake(8.0)
 	GameAudio.sfx("levelup")
+	Vfx.ring(_world, pos, Color("ff6a5a") if key == "finalboss" else Color("b14a8a"), 90.0, 0.6)
 	_show_banner("The Warden Awakens" if key == "finalboss" else "A Champion Approaches")
 
 func _show_banner(text: String) -> void:
@@ -759,6 +768,7 @@ func _open_level_up() -> void:
 	while _pending_levels > 0:
 		_flash = 0.5
 		GameAudio.sfx("levelup")
+		Vfx.ring(_world, _player.global_position, UiTheme.GOLD_BRIGHT, 70.0, 0.45)
 		var opts := Abilities.roll(_player.cls_id, _player.owned_ranks(), 5)
 		if opts.is_empty():
 			_player.hp = min(_player.max_hp, _player.hp + 30.0)
@@ -977,6 +987,7 @@ func _on_player_died() -> void:
 		return
 	if _try_revive():
 		return
+	Vfx.burst(_world, _player.global_position, Color("c0473f"), 20, 180.0, 0.6, 4.0)
 	_state = "dead"
 	_end_run("You Died")
 
@@ -991,6 +1002,7 @@ func _try_revive() -> bool:
 	_flash = 0.6
 	add_shake(8.0)
 	GameAudio.sfx("levelup")
+	Vfx.ring(_world, _player.global_position, UiTheme.GOLD_BRIGHT, 220.0, 0.5)
 	_show_banner("Second Wind!")
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var off: Vector2 = e.global_position - _player.global_position
