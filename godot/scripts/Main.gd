@@ -59,6 +59,7 @@ var _joy_active := false
 var _joy_id := -1
 var _joy_base := Vector2.ZERO
 var _joy_vec := Vector2.ZERO
+var _joy_visual: Control
 
 # Level-up flow
 var _pending_levels := 0
@@ -157,8 +158,7 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	_world.add_child(_player)
 
 	_camera = Camera2D.new()
-	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = 8.0
+	_camera.position_smoothing_enabled = false   # instant 1:1 follow, matching js/game.js's camX/camY
 	_player.add_child(_camera)
 	_camera.make_current()
 
@@ -726,11 +726,25 @@ func _input(event: InputEvent) -> void:
 		# button inside _pause_ui — matching js/game.js's Escape/pause-btn split.
 		if _state == "playing" and not get_tree().paused:
 			_open_pause()
+	_sync_joy_visual()
+
+# Mirrors the joystick ring/knob onto JoystickVisual (ported from the
+# `if (joy.active) {...}` draw block in js/game.js's render()); the knob is
+# clamped to the ring radius exactly like the JS's `cl = min(d, max)`.
+func _sync_joy_visual() -> void:
+	if not _joy_visual:
+		return
+	_joy_visual.active = _joy_active
+	_joy_visual.base = _joy_base
+	_joy_visual.knob = _joy_base + (_joy_vec * 50.0).limit_length(50.0)
 
 # ── HUD ───────────────────────────────────────────────────────────────────────
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+
+	_joy_visual = preload("res://scripts/JoystickVisual.gd").new()
+	layer.add_child(_joy_visual)
 
 	# Low-HP vignette (behind the flash/HUD, above the game world).
 	_vignette = TextureRect.new()
