@@ -2,6 +2,11 @@ extends Node
 ## Static game data ported from the JS build (js/classes.js +
 ## assets/anim/manifest.json). Autoloaded as `GameData`.
 
+# Temporarily vaulted: only these are offered in Class Select while
+# Cleric/Barbarian still use the old shared ability mechanics (pending their
+# own bespoke-kit pass, same as Knight/Archer/Mage already got).
+const AVAILABLE_CLASSES := ["knight", "archer", "mage", "rogue"]
+
 # The six playable classes (base stat tilt + weapon pool), ported from
 # js/classes.js. `unlock.type` is "default" | "gold" | "achievement".
 const CLASSES := {

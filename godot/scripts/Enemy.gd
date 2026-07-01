@@ -162,10 +162,13 @@ func apply_burn(dps: float, seconds: float) -> void:
 func take_damage(amount: float, crit: bool = false) -> void:
 	var main := get_tree().current_scene
 	var mult := marked_mult if (main and marked_until > main.elapsed) else 1.0
-	hp -= amount * mult
+	var dealt := amount * mult
+	hp -= dealt
 	_hit_flash = 0.1
 	queue_redraw()
 	GameAudio.sfx("crit" if crit else "hit")
+	if main:
+		Vfx.damage_number(main.get_node("World"), global_position, dealt, crit)
 	if hp <= 0.0:
 		_die()
 
