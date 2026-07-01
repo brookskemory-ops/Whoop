@@ -100,6 +100,51 @@ func achievement_by_id(id: String) -> Dictionary:
 			return a
 	return {}
 
+# Stages: distinct themed maps, each with its own bounds/obstacle density and
+# enemy-pool identity. "Stage" here means map/theme — NOT the same concept as
+# player.level (character XP progression), which is unrelated.
+const STAGES := [
+	{"id": "forest", "name": "Ashwood Vale", "tileset": "forest",
+		"unlock": {"type": "default"}, "bounds": Vector2(3200.0, 3200.0), "obstacle_density": 0.06},
+	{"id": "dungeon", "name": "The Sunken Vault", "tileset": "dungeon",
+		"unlock": {"type": "stage_clear", "stage": "forest"}, "bounds": Vector2(2800.0, 2800.0), "obstacle_density": 0.09},
+]
+
+# Difficulty tiers apply across all stages. A tier unlocks globally once every
+# stage in STAGES has been cleared at the previous tier (see
+# GameSave.stage_clears / GameSave.unlocked_tier).
+const DIFFICULTIES := [
+	{"id": "tier1", "name": "Novice Oath", "hp_mult": 1.0, "dmg_mult": 1.0, "spawn_mult": 1.0},
+	{"id": "tier2", "name": "Sworn Oath", "hp_mult": 1.35, "dmg_mult": 1.2, "spawn_mult": 1.15,
+		"unlocks_enemy": ["charger"]},
+	{"id": "tier3", "name": "Broken Oath", "hp_mult": 1.8, "dmg_mult": 1.45, "spawn_mult": 1.3,
+		"unlocks_enemy": ["charger", "splitter"], "hazard_intensity": 1.5},
+]
+
+func stage_by_id(id: String) -> Dictionary:
+	for s in STAGES:
+		if s["id"] == id:
+			return s
+	return {}
+
+func stage_index(id: String) -> int:
+	for i in STAGES.size():
+		if STAGES[i]["id"] == id:
+			return i
+	return -1
+
+func difficulty_by_id(id: String) -> Dictionary:
+	for d in DIFFICULTIES:
+		if d["id"] == id:
+			return d
+	return {}
+
+func difficulty_index(id: String) -> int:
+	for i in DIFFICULTIES.size():
+		if DIFFICULTIES[i]["id"] == id:
+			return i
+	return -1
+
 # Permanent meta-upgrade tracks (bought with gold in the Armory), ported from
 # UPGRADE_TRACKS in js/game.js.
 const UPGRADE_TRACKS := [
