@@ -104,12 +104,12 @@ func achievement_by_id(id: String) -> Dictionary:
 # enemy-pool identity. "Stage" here means map/theme — NOT the same concept as
 # player.level (character XP progression), which is unrelated.
 const STAGES := [
-	{"id": "forest", "name": "Ashwood Vale", "tileset": "forest",
-		"unlock": {"type": "default"}, "bounds": Vector2(3200.0, 3200.0), "obstacle_density": 0.06,
+	{"id": "forest", "name": "Ashwood Vale", "tileset": "forest", "lighting": "bright",
+		"unlock": {"type": "default"}, "bounds": Vector2(4000.0, 4000.0), "obstacle_density": 0.12,
 		"obstacle_textures": ["res://assets/map/obstacles/forest_tree.png", "res://assets/map/obstacles/forest_tree.png",
 			"res://assets/map/obstacles/forest_rock.png", "res://assets/map/obstacles/forest_bush.png"]},
-	{"id": "dungeon", "name": "The Sunken Vault", "tileset": "dungeon",
-		"unlock": {"type": "stage_clear", "stage": "forest"}, "bounds": Vector2(2800.0, 2800.0), "obstacle_density": 0.09,
+	{"id": "dungeon", "name": "The Sunken Vault", "tileset": "dungeon", "lighting": "torch",
+		"unlock": {"type": "stage_clear", "stage": "forest"}, "bounds": Vector2(3600.0, 3600.0), "obstacle_density": 0.15,
 		"obstacle_textures": ["res://assets/map/obstacles/dungeon_pillar.png", "res://assets/map/obstacles/dungeon_rubble.png",
 			"res://assets/map/obstacles/forest_rock.png"]},
 ]
