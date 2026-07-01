@@ -52,6 +52,18 @@ func setup(key: String, scale_mult: float) -> void:
 	is_boss = b.get("boss", false)
 	is_final = b.get("final", false)
 	add_to_group("enemies")
+	# Physics: enemies are on layer 2 and mask only the environment — they pass
+	# through the player and each other (contact damage / combat is handled by
+	# distance checks). Regular enemies collide with both walls (layer 3) and
+	# obstacle props (layer 4); bosses collide with walls only so a big body
+	# can't get wedged on a tree/pillar mid-fight.
+	collision_layer = 0b10
+	collision_mask = 0b100 if is_boss else 0b1100
+	var col := CollisionShape2D.new()
+	var shape := CircleShape2D.new()
+	shape.radius = radius * 0.85
+	col.shape = shape
+	add_child(col)
 	if GameData.MOB_ART.has(key):
 		_art_key = key
 		_spr = Sprite2D.new()

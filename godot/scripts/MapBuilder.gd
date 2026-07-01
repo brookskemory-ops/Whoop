@@ -63,9 +63,13 @@ static func build_ground(stage: Dictionary) -> TileMap:
 	var hc := cols / 2
 	var hr := rows / 2
 
+	# Over-fill a few cells past the play bounds so that when the camera sits
+	# against its limit there's never a strip of empty background showing
+	# beyond the ground (matters most on the bright, torch-less forest).
+	var pad := 3
 	var all_cells: Array[Vector2i] = []
-	for x in range(-hc, hc):
-		for y in range(-hr, hr):
+	for x in range(-hc - pad, hc + pad):
+		for y in range(-hr - pad, hr + pad):
 			all_cells.append(Vector2i(x, y))
 	tile_map.set_cells_terrain_connect(0, all_cells, 0, 0, false)
 
@@ -115,3 +119,32 @@ static func scatter_obstacles(world: Node2D, stage: Dictionary, textures: Array,
 		world.add_child(obs)
 		placed.append({"pos": pos, "radius": radius})
 	return placed
+
+## Builds an invisible perimeter of four StaticBody2D walls at the play bounds
+## so the player (and enemies) are physically contained — the Camera2D limits
+## stop the view at the edge, but without these walls the player would keep
+## walking off-screen into the void beyond it.
+static func build_walls(stage: Dictionary) -> StaticBody2D:
+	var body := StaticBody2D.new()
+	body.name = "Walls"
+	# Arena perimeter sits on layer 3 (see Player/Enemy collision masks) — both
+	# the player and every enemy (including bosses) are contained by it.
+	body.collision_layer = 0b100
+	body.collision_mask = 0
+	var half: Vector2 = stage["bounds"] * 0.5
+	var thick := 64.0
+	# [center, size] for each of the four edges (walls sit just outside bounds).
+	var edges := [
+		[Vector2(0, -half.y - thick * 0.5), Vector2(half.x * 2.0 + thick * 2.0, thick)],  # top
+		[Vector2(0, half.y + thick * 0.5), Vector2(half.x * 2.0 + thick * 2.0, thick)],   # bottom
+		[Vector2(-half.x - thick * 0.5, 0), Vector2(thick, half.y * 2.0 + thick * 2.0)],  # left
+		[Vector2(half.x + thick * 0.5, 0), Vector2(thick, half.y * 2.0 + thick * 2.0)],   # right
+	]
+	for e in edges:
+		var col := CollisionShape2D.new()
+		var shape := RectangleShape2D.new()
+		shape.size = e[1]
+		col.shape = shape
+		col.position = e[0]
+		body.add_child(col)
+	return body

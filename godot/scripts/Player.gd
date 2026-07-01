@@ -95,6 +95,16 @@ func setup(id: String, chosen_weapon_id: String = "") -> void:
 
 func _ready() -> void:
 	add_to_group("player")
+	# Physics: collide with arena walls (layer 3) and obstacle props (layer 4)
+	# only — combat is distance-based, so we pass straight through enemies
+	# rather than being shoved around by the swarm.
+	collision_layer = 1
+	collision_mask = 0b1100
+	var col := CollisionShape2D.new()
+	var shape := CircleShape2D.new()
+	shape.radius = 12.0
+	col.shape = shape
+	add_child(col)
 	_spr.scale = Vector2(SPRITE_SCALE, SPRITE_SCALE)
 	add_child(_spr)
 	if weapon_type == "orbital":

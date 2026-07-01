@@ -132,11 +132,18 @@ func _rebuild_stage(stage: Dictionary) -> void:
 	var map_builder := preload("res://scripts/MapBuilder.gd")
 	var ground: TileMap = map_builder.build_ground(stage)
 	_stage_root.add_child(ground)
+	_stage_root.add_child(map_builder.build_walls(stage))
 
 	var textures: Array = []
 	for path in stage["obstacle_textures"]:
 		textures.append(load(path))
 	_obstacles = map_builder.scatter_obstacles(_stage_root, stage, textures)
+
+	# Per-stage lighting: the torch-darkness overlay is a dungeon mood effect;
+	# on the bright forest it'd render a sunny meadow as a black cave and hide
+	# the arena/obstacles, so only torch-lit stages get it.
+	if _torch_overlay:
+		_torch_overlay.visible = stage.get("lighting", "torch") == "torch"
 
 # Clamps a candidate spawn position inside the active stage's bounds and,
 # if it lands inside an obstacle, resamples the angle a few times before
@@ -714,12 +721,15 @@ func _update_visuals(delta: float) -> void:
 
 	_camera.offset = Vector2(randf_range(-0.5, 0.5), randf_range(-0.5, 0.5)) * _shake if _shake > 0.0 else Vector2.ZERO
 
-	var torch_flicker := sin(elapsed * 9.0) * 5.0 + sin(elapsed * 23.0) * 3.0
-	var lit_r := maxf(245.0, minf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6) + torch_flicker
-	# The player is always at screen-center (instant 1:1 camera follow), so the
-	# overlay's fixed screen-center position never needs updating — only scale
-	# reproduces the flicker.
-	_torch_overlay.scale = Vector2.ONE * (lit_r / _TORCH_BASE_RADIUS)
+	# Torch flicker only matters on stages that actually use the overlay
+	# (see per-stage lighting in _rebuild_stage).
+	if _torch_overlay.visible:
+		var torch_flicker := sin(elapsed * 9.0) * 5.0 + sin(elapsed * 23.0) * 3.0
+		var lit_r := maxf(245.0, minf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6) + torch_flicker
+		# The player is always at screen-center (instant 1:1 camera follow), so the
+		# overlay's fixed screen-center position never needs updating — only scale
+		# reproduces the flicker.
+		_torch_overlay.scale = Vector2.ONE * (lit_r / _TORCH_BASE_RADIUS)
 
 	_flash_overlay.color.a = minf(0.5, _flash) * 0.5
 
@@ -1357,7 +1367,13 @@ func _run_selftest() -> void:
 	for c in _world.get_children():
 		if c.get_script() == preload("res://scripts/Gem.gd"):
 			gems += 1
-	var sprite_ok := _player.get_child(0) is Sprite2D and _player.get_child(0).texture != null
+	# The player now has a CollisionShape2D child too, so find the sprite by
+	# type rather than assuming a fixed child index.
+	var sprite_ok := false
+	for c in _player.get_children():
+		if c is Sprite2D and c.texture != null:
+			sprite_ok = true
+			break
 	print("[SELFTEST] elapsed=%.1f hp=%.0f/%.0f level=%d enemies=%d kills=%d gold=%.0f proj=%d gems=%d skills=%d anim_texture_ok=%s moved=%s" % [
 		elapsed, _player.hp, _player.max_hp, _player.level, enemies, run_kills, run_gold,
 		projectiles, gems, _player.skills.size(), str(sprite_ok), str(_player.global_position.length() > 1.0)])
@@ -1441,6 +1457,8 @@ func _run_stagetest() -> void:
 		var limits_ok := _camera.limit_left == int(-half.x) and _camera.limit_right == int(half.x) \
 			and _camera.limit_top == int(-half.y) and _camera.limit_bottom == int(half.y)
 		var ground_ok := _stage_root != null and _stage_root.get_child_count() > 0
+		var walls_ok := _stage_root.get_node_or_null("Walls") != null
+		var torch_ok: bool = _torch_overlay.visible == (stage.get("lighting", "torch") == "torch")
 		var spawn_in_bounds := true
 		var spawn_clear := true
 		for i in 30:
@@ -1449,8 +1467,19 @@ func _run_stagetest() -> void:
 				spawn_in_bounds = false
 			if _pos_blocked(pos):
 				spawn_clear = false
-		print("[STAGETEST] stage=%s limits_ok=%s ground_ok=%s obstacles=%d spawn_in_bounds=%s spawn_clear=%s" % [
-			stage["id"], str(limits_ok), str(ground_ok), _obstacles.size(), str(spawn_in_bounds), str(spawn_clear)])
+		# Place the player near the corner, then drive it hard into the walls and
+		# confirm the perimeter actually contains it (the real regression guard
+		# for the collision-shape fix — without shapes the body walks off-map).
+		_player.global_position = Vector2(half.x - 60.0, half.y - 60.0)
+		_testing = true
+		_test_dir = Vector2(1, 1)
+		for i in 150:
+			await get_tree().physics_frame
+		var contained := _player.global_position.x <= half.x + 40.0 and _player.global_position.y <= half.y + 40.0
+		_testing = false; _test_dir = Vector2.ZERO
+		_player.global_position = Vector2.ZERO
+		print("[STAGETEST] stage=%s limits_ok=%s ground_ok=%s walls_ok=%s torch_ok=%s obstacles=%d spawn_in_bounds=%s spawn_clear=%s contained=%s" % [
+			stage["id"], str(limits_ok), str(ground_ok), str(walls_ok), str(torch_ok), _obstacles.size(), str(spawn_in_bounds), str(spawn_clear), str(contained)])
 	get_tree().quit(0)
 
 # Verifies pause -> settings (volume/mute, persisted) -> back -> resume, then
