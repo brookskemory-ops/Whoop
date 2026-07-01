@@ -46,8 +46,13 @@ var _settings_ui: CanvasLayer
 # HUD
 var _lbl_level: Label
 var _lbl_time: Label
+var _lbl_gold: Label
 var _hp_fill: ColorRect
 var _hp_w := 200.0
+var _xp_fill: ColorRect
+var _xp_w := 200.0
+var _ability_header: Control
+var _ability_header_sig := ""
 var _boss_bg: ColorRect
 var _boss_fill: ColorRect
 var _lbl_boss_name: Label
@@ -160,6 +165,7 @@ func _begin_run(class_id: String, weapon_id: String) -> void:
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
 	_boss = null; _next_mini = 0; _final_spawned = false
 	_banner_text = ""; _banner_timer = 0.0
+	_ability_header_sig = ""
 	_last_beat = 0.0; _shake = 0.0; _flash = 0.0
 	_state = "playing"
 	GameAudio.start_music()
@@ -255,7 +261,7 @@ func _show_class_select() -> void:
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	vbox.add_child(grid)
-	for cid in GameData.CLASSES:
+	for cid in GameData.AVAILABLE_CLASSES:
 		var c: Dictionary = GameData.CLASSES[cid]
 		var unlocked := GameSave.class_unlocked(cid)
 		var accent := Color(c["color"])
@@ -600,7 +606,9 @@ func _process(delta: float) -> void:
 	var boss_active_final: bool = _boss != null and is_instance_valid(_boss) and _boss.is_final
 	if not boss_active_final:
 		_spawn_timer -= delta
-		var interval: float = max(0.16, 1.1 - elapsed * 0.01)
+		# Softened from max(0.16, 1.1 - elapsed*0.01): starts slower (1.4s vs
+		# 1.1s) and takes ~2.5min instead of ~1.5min to reach a (slower) floor.
+		var interval: float = max(0.22, 1.4 - elapsed * 0.008)
 		if _spawn_timer <= 0.0:
 			_spawn_enemy()
 			_spawn_timer = interval
@@ -681,17 +689,20 @@ func _spawn_enemy() -> void:
 	var ang := randf() * TAU
 	var dist := maxf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6 + 40.0
 	var pos := _player.global_position + Vector2(cos(ang), sin(ang)) * dist
-	var e: Node = add_enemy(key, pos, 1.0 + m * 0.35)
-	# Occasional elite (ported from js/game.js spawnEnemy).
-	if m > 1.0 and randf() < 0.06:
+	var e: Node = add_enemy(key, pos, 1.0 + m * 0.25)
+	# Occasional elite (ported from js/game.js spawnEnemy). Softened: starts
+	# later (1.5min vs 1min) and less often (4.5% vs 6%).
+	if m > 1.5 and randf() < 0.045:
 		e.elite = true
 		e.hp *= 3.2; e.max_hp = e.hp; e.radius *= 1.3; e.dmg *= 1.4; e.gold *= 4.0; e.xp *= 3.0
 
 func _weighted_archetype(m: float) -> String:
+	# Tougher archetypes are pushed back slightly so the opening stretch
+	# stays skeletons/goblins a bit longer before shooters/exploders/etc. mix in.
 	var choices := [
-		["skeleton", 10.0], ["goblin", 3.0 + m], ["ogre", maxf(0.0, m - 0.5)],
-		["shooter", maxf(0.0, m - 1.0) * 1.2], ["exploder", maxf(0.0, m - 1.5) * 1.1],
-		["splitter", maxf(0.0, m - 2.0)], ["charger", maxf(0.0, m - 2.5)],
+		["skeleton", 10.0], ["goblin", 3.0 + m], ["ogre", maxf(0.0, m - 0.8)],
+		["shooter", maxf(0.0, m - 1.3) * 1.2], ["exploder", maxf(0.0, m - 1.8) * 1.1],
+		["splitter", maxf(0.0, m - 2.3)], ["charger", maxf(0.0, m - 2.8)],
 	]
 	var total := 0.0
 	for c in choices: total += c[1]
@@ -1018,13 +1029,33 @@ func _build_hud() -> void:
 	UiTheme.style_heading(_lbl_time, UiTheme.GOLD_BRIGHT, 18)
 	layer.add_child(_lbl_time)
 
+	_lbl_gold = Label.new(); _lbl_gold.position = Vector2(12, 27)
+	UiTheme.style_heading(_lbl_gold, UiTheme.GOLD_BRIGHT, 14)
+	layer.add_child(_lbl_gold)
+
 	var hp_bg := Panel.new()
 	hp_bg.add_theme_stylebox_override("panel", _bar_bg_style())
-	hp_bg.position = Vector2(12, 34); hp_bg.size = Vector2(_hp_w, 12)
+	hp_bg.position = Vector2(12, 46); hp_bg.size = Vector2(_hp_w, 12)
 	layer.add_child(hp_bg)
 	_hp_fill = ColorRect.new()
-	_hp_fill.color = UiTheme.HP_COLOR; _hp_fill.position = Vector2(13, 35); _hp_fill.size = Vector2(_hp_w - 2, 10)
+	_hp_fill.color = UiTheme.HP_COLOR; _hp_fill.position = Vector2(13, 47); _hp_fill.size = Vector2(_hp_w - 2, 10)
 	layer.add_child(_hp_fill)
+
+	var xp_bg := Panel.new()
+	xp_bg.add_theme_stylebox_override("panel", _bar_bg_style())
+	xp_bg.position = Vector2(12, 60); xp_bg.size = Vector2(_xp_w, 6)
+	layer.add_child(xp_bg)
+	_xp_fill = ColorRect.new()
+	_xp_fill.color = UiTheme.XP_COLOR; _xp_fill.position = Vector2(13, 61); _xp_fill.size = Vector2(_xp_w - 2, 4)
+	layer.add_child(_xp_fill)
+
+	# Ability header: icon + rank badge per currently-owned ability, refreshed
+	# from _update_hud() whenever the owned-abilities signature changes.
+	_ability_header = HFlowContainer.new()
+	_ability_header.position = Vector2(12, 72); _ability_header.custom_minimum_size = Vector2(380, 0)
+	_ability_header.add_theme_constant_override("h_separation", 4)
+	_ability_header.add_theme_constant_override("v_separation", 4)
+	layer.add_child(_ability_header)
 
 	var ab_btn := _make_button("*")
 	ab_btn.position = Vector2(390, 712); ab_btn.custom_minimum_size = Vector2(72, 72)
@@ -1037,14 +1068,14 @@ func _build_hud() -> void:
 	layer.add_child(pause_btn)
 
 	# Boss health bar (hidden until a boss is present).
-	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 50)
+	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 108)
 	UiTheme.style_heading(_lbl_boss_name, UiTheme.MUTED, 13)
 	_lbl_boss_name.visible = false; layer.add_child(_lbl_boss_name)
 	_boss_bg = ColorRect.new()
-	_boss_bg.color = Color(0, 0, 0, 0.5); _boss_bg.position = Vector2(100, 70); _boss_bg.size = Vector2(_boss_w, 10)
+	_boss_bg.color = Color(0, 0, 0, 0.5); _boss_bg.position = Vector2(100, 128); _boss_bg.size = Vector2(_boss_w, 10)
 	_boss_bg.visible = false; layer.add_child(_boss_bg)
 	_boss_fill = ColorRect.new()
-	_boss_fill.color = Color("b14a8a"); _boss_fill.position = Vector2(100, 70); _boss_fill.size = Vector2(_boss_w, 10)
+	_boss_fill.color = Color("b14a8a"); _boss_fill.position = Vector2(100, 128); _boss_fill.size = Vector2(_boss_w, 10)
 	_boss_fill.visible = false; layer.add_child(_boss_fill)
 
 	# Event banner (mini-boss/final-boss announcements).
@@ -1061,10 +1092,52 @@ func _bar_bg_style() -> StyleBoxFlat:
 	s.set_corner_radius_all(6)
 	return s
 
+func _badge_style() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(UiTheme.STONE2.r, UiTheme.STONE2.g, UiTheme.STONE2.b, 0.85)
+	s.border_color = UiTheme.BORDER
+	s.set_border_width_all(1)
+	s.set_corner_radius_all(5)
+	s.content_margin_left = 4; s.content_margin_right = 5
+	s.content_margin_top = 2; s.content_margin_bottom = 2
+	return s
+
+func _refresh_ability_header() -> void:
+	for c in _ability_header.get_children():
+		c.queue_free()
+	for s in _player.skills:
+		var def := Abilities.by_id(s["id"])
+		var badge := PanelContainer.new()
+		badge.add_theme_stylebox_override("panel", _badge_style())
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 3)
+		badge.add_child(row)
+		var icon := TextureRect.new()
+		var icon_path := "res://assets/icons/abilities/%s.png" % def.get("icon_key", def["mech"])
+		if ResourceLoader.exists(icon_path):
+			icon.texture = load(icon_path)
+		icon.modulate = Color(def["color"])
+		icon.custom_minimum_size = Vector2(16, 16)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(icon)
+		var lbl := Label.new()
+		lbl.text = "%d" % s["rank"]
+		UiTheme.style_muted(lbl, 11)
+		row.add_child(lbl)
+		_ability_header.add_child(badge)
+
 func _update_hud() -> void:
 	_lbl_level.text = "Lv %d" % _player.level
 	_lbl_time.text = "%d:%02d" % [int(elapsed) / 60, int(elapsed) % 60]
+	_lbl_gold.text = "Gold: %d" % int(floor(run_gold))
 	_hp_fill.size.x = _hp_w * clampf(_player.hp / _player.max_hp, 0.0, 1.0)
+	_xp_fill.size.x = _xp_w * clampf(_player.xp / _player.xp_next, 0.0, 1.0)
+
+	var sig := ""
+	for s in _player.skills: sig += "%s:%d," % [s["id"], s["rank"]]
+	if sig != _ability_header_sig:
+		_ability_header_sig = sig
+		_refresh_ability_header()
 
 	var boss_live: bool = _boss != null and is_instance_valid(_boss) and _boss.hp > 0.0
 	_boss_bg.visible = boss_live; _boss_fill.visible = boss_live; _lbl_boss_name.visible = boss_live

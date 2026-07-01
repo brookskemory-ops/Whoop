@@ -72,3 +72,13 @@ static func chain_link(world: Node, from: Vector2, to: Vector2, color: Color, wi
 	l.life = life
 	l.z_index = 55
 	world.add_child(l)
+
+## Floating combat text — spawned from Enemy.take_damage() for every hit.
+static func damage_number(world: Node, pos: Vector2, amount: float, crit: bool = false) -> void:
+	if world == null or not is_instance_valid(world):
+		return
+	var n := preload("res://scripts/DamageNumber.gd").new()
+	world.add_child(n)
+	n.global_position = pos
+	n.z_index = 90
+	n.setup(amount, crit)
