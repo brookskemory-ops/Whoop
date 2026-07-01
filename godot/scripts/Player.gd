@@ -25,7 +25,7 @@ var aoe_mult := 1.0
 var crit_mult := 2.0
 var proj_count := 1
 
-# Permanent meta-upgrades (applied in setup() from GameSave.upgrades).
+# Permanent meta-upgrades (applied in setup() from GameSave.class_upgrades).
 var revives := 0
 var fortune_gold := 1.0
 var fortune_xp := 1.0
@@ -83,7 +83,8 @@ func setup(id: String, chosen_weapon_id: String = "") -> void:
 	_has_anim = GameData.ANIMATED_CLASSES.has(id)
 
 	# Apply permanent upgrades bought in the Armory (ported from createPlayer).
-	var u: Dictionary = GameSave.upgrades
+	# Upgrades are per-class — read this class's own track, not a shared pool.
+	var u: Dictionary = GameSave.class_upgrades.get(id, {})
 	max_hp += float(u.get("vigor", 0)) * 20.0
 	damage *= 1.0 + float(u.get("might", 0)) * 0.08
 	move_speed *= 1.0 + float(u.get("haste", 0)) * 0.05

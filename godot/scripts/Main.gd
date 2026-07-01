@@ -372,12 +372,28 @@ func _show_shop() -> void:
 	gold_row.add_child(gold_lbl)
 	vbox.add_child(_spacer(8))
 
+	# Upgrades are per-character — a small class-picker row lets the player
+	# choose whose track they're viewing/buying (defaults to last-selected).
 	var upg_hdr := Label.new(); upg_hdr.text = "PERMANENT UPGRADES"
 	UiTheme.style_heading(upg_hdr, UiTheme.GOLD_BRIGHT, 13)
 	vbox.add_child(upg_hdr)
+	var class_row := HBoxContainer.new()
+	class_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(class_row)
+	for cid in GameData.AVAILABLE_CLASSES:
+		var cdef: Dictionary = GameData.CLASSES[cid]
+		var cb := Button.new()
+		cb.theme = _ui_theme
+		cb.text = cdef["name"]
+		cb.custom_minimum_size = Vector2(0, 36)
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.accent_button_style(cb, Color(cdef["color"]), cid == _selected_class)
+		cb.pressed.connect(func(): GameAudio.sfx("uiClick"); _selected_class = cid; _show_shop())
+		class_row.add_child(cb)
+	vbox.add_child(_spacer(6))
 	for t in GameData.UPGRADE_TRACKS:
 		var id: String = t["id"]
-		var lvl: int = int(GameSave.upgrades.get(id, 0))
+		var lvl: int = GameSave.get_class_upgrade(_selected_class, id)
 		var maxed: bool = lvl >= int(t["max"])
 		var cost := GameData.upgrade_cost(id, lvl)
 		var row := _make_button("")
@@ -420,11 +436,11 @@ func _shop_unlock_row(vbox: VBoxContainer, label: String, cost: int, handler: Ca
 	vbox.add_child(b)
 
 func _buy_upgrade(id: String) -> void:
-	var lvl: int = int(GameSave.upgrades.get(id, 0))
+	var lvl: int = GameSave.get_class_upgrade(_selected_class, id)
 	var cost := GameData.upgrade_cost(id, lvl)
 	if GameSave.gold >= cost:
 		GameSave.gold -= cost
-		GameSave.upgrades[id] = lvl + 1
+		GameSave.set_class_upgrade(_selected_class, id, lvl + 1)
 		GameAudio.sfx("purchase")
 		GameSave.save_data()
 		_show_shop()
