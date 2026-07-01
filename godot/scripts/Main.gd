@@ -71,8 +71,11 @@ var _level_ui: CanvasLayer
 var _testing := false
 var _test_dir := Vector2.ZERO
 
+var _ui_theme: Theme
+
 func _ready() -> void:
 	randomize()
+	_ui_theme = UiTheme.build()
 	GameAudio.config(GameSave.volume, GameSave.muted)
 	if _has_flag("--fast") or _has_flag("--bosstest"):
 		_win_time = 12.0
@@ -183,73 +186,142 @@ func _menu_base() -> VBoxContainer:
 	_menu_ui.layer = 10
 	add_child(_menu_ui)
 	var dim := ColorRect.new()
-	dim.color = Color(0.06, 0.05, 0.04, 1.0); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = UiTheme.BG; dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_menu_ui.add_child(dim)
 	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(20, 50); scroll.custom_minimum_size = Vector2(440, 700)
+	scroll.theme = _ui_theme
+	scroll.position = Vector2(20, 90); scroll.custom_minimum_size = Vector2(440, 660)
 	_menu_ui.add_child(scroll)
 	var vbox := VBoxContainer.new()
 	vbox.custom_minimum_size = Vector2(420, 0)
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", 10)
 	scroll.add_child(vbox)
 	return vbox
 
 func _show_title() -> void:
 	var vbox := _menu_base()
-	var title := Label.new(); title.text = "IRONVOW"; vbox.add_child(title)
-	var stats := Label.new()
-	stats.text = "Best time: %d:%02d   Gold: %d" % [int(GameSave.best_time) / 60, int(GameSave.best_time) % 60, GameSave.gold]
-	vbox.add_child(stats)
-	var start_btn := Button.new(); start_btn.text = "Start Run"; start_btn.custom_minimum_size = Vector2(400, 56)
+	var title := Label.new(); title.text = "IRONVOW"; title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(title, 44)
+	vbox.add_child(title)
+	var tagline := Label.new(); tagline.text = "Hold the line. Forge your legend."
+	tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_muted(tagline, 14)
+	vbox.add_child(tagline)
+	vbox.add_child(_spacer(18))
+
+	var start_btn := _make_button("New Run", true)
 	start_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_class_select())
 	vbox.add_child(start_btn)
-	var shop_btn := Button.new(); shop_btn.text = "Armory"; shop_btn.custom_minimum_size = Vector2(400, 48)
+	var shop_btn := _make_button("Armory (Shop)")
 	shop_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_shop())
 	vbox.add_child(shop_btn)
-	var ach_btn := Button.new(); ach_btn.text = "Achievements"; ach_btn.custom_minimum_size = Vector2(400, 48)
+	var ach_btn := _make_button("Deeds (Achievements)")
 	ach_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_achievements())
 	vbox.add_child(ach_btn)
-	var settings_btn := Button.new(); settings_btn.text = "Settings"; settings_btn.custom_minimum_size = Vector2(400, 48)
+	var settings_btn := _make_button("Settings")
 	settings_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_settings(_show_title))
 	vbox.add_child(settings_btn)
 
+	vbox.add_child(_spacer(10))
+	var stats := Label.new()
+	stats.text = "Best: %d:%02d    Gold: %d" % [int(GameSave.best_time) / 60, int(GameSave.best_time) % 60, GameSave.gold]
+	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_muted(stats, 14)
+	vbox.add_child(stats)
+
+func _spacer(h: int) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	return c
+
+func _make_button(text: String, primary: bool = false) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(400, 52)
+	b.theme = _ui_theme
+	if primary:
+		b.theme_type_variation = "PrimaryButton"
+	return b
+
 func _show_class_select() -> void:
 	var vbox := _menu_base()
-	var hdr := Label.new(); hdr.text = "Choose your class"; vbox.add_child(hdr)
+	var hdr := Label.new(); hdr.text = "Choose Your Champion"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 22)
+	vbox.add_child(hdr)
+	vbox.add_child(_spacer(6))
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	vbox.add_child(grid)
 	for cid in GameData.CLASSES:
 		var c: Dictionary = GameData.CLASSES[cid]
 		var unlocked := GameSave.class_unlocked(cid)
+		var accent := Color(c["color"])
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(400, 56)
-		b.text = "%s\n%s" % [c["name"] if unlocked else "🔒 %s — %s" % [c["name"], _lock_text(c["unlock"])], c["blurb"] if unlocked else ""]
-		if cid == _selected_class:
-			b.modulate = Color(1.25, 1.25, 0.95)
+		b.theme = _ui_theme
+		b.custom_minimum_size = Vector2(196, 84)
+		b.text = ""
+		UiTheme.accent_button_style(b, accent, cid == _selected_class)
 		b.pressed.connect(_pick_class.bind(cid))
-		vbox.add_child(b)
 
-	var weapon_hdr := Label.new(); weapon_hdr.text = "Weapon:"; vbox.add_child(weapon_hdr)
+		var inner := VBoxContainer.new()
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+		inner.offset_left = 14; inner.offset_top = 10
+		inner.offset_right = -14; inner.offset_bottom = -10
+		inner.add_theme_constant_override("separation", 3)
+		b.add_child(inner)
+
+		var name_lbl := Label.new()
+		name_lbl.text = c["name"]
+		name_lbl.add_theme_color_override("font_color", accent if unlocked else UiTheme.MUTED)
+		name_lbl.add_theme_font_size_override("font_size", 18)
+		inner.add_child(name_lbl)
+
+		var blurb_lbl := Label.new()
+		blurb_lbl.text = c["blurb"] if unlocked else ("(Locked) %s" % _lock_text(c["unlock"]))
+		blurb_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		UiTheme.style_muted(blurb_lbl, 12)
+		inner.add_child(blurb_lbl)
+
+		grid.add_child(b)
+
+	vbox.add_child(_spacer(10))
+	var weapon_hdr := Label.new(); weapon_hdr.text = "Weapon:"
+	UiTheme.style_muted(weapon_hdr, 14)
+	vbox.add_child(weapon_hdr)
+	var chip_row := HBoxContainer.new()
+	chip_row.add_theme_constant_override("separation", 8)
+	vbox.add_child(chip_row)
 	var cls: Dictionary = GameData.CLASSES[_selected_class]
 	for wid in cls["weapons"]:
 		var w: Dictionary = GameData.WEAPON_META[wid]
 		var wun := GameSave.weapon_unlocked(wid)
 		var wb := Button.new()
-		wb.custom_minimum_size = Vector2(400, 44)
-		wb.text = w["name"] if wun else "🔒 %s" % w["name"]
-		if wid == _selected_weapon:
-			wb.modulate = Color(1.25, 1.25, 0.95)
+		wb.theme = _ui_theme
+		wb.custom_minimum_size = Vector2(190, 44)
+		wb.text = w["name"] if wun else "(Locked) %s" % w["name"]
+		if wid == _selected_weapon and wun:
+			wb.theme_type_variation = "PrimaryButton"
+		wb.disabled = not wun
 		wb.pressed.connect(_pick_weapon.bind(wid))
-		vbox.add_child(wb)
+		chip_row.add_child(wb)
 	var detail := Label.new()
 	detail.text = GameData.WEAPON_META[_selected_weapon]["desc"]
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD
+	UiTheme.style_muted(detail, 13)
 	vbox.add_child(detail)
 
-	var begin_btn := Button.new(); begin_btn.text = "Begin"; begin_btn.custom_minimum_size = Vector2(400, 56)
+	vbox.add_child(_spacer(10))
+	var back_btn := _make_button("Back")
+	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
+	vbox.add_child(back_btn)
+	var begin_btn := _make_button("Begin", true)
 	begin_btn.disabled = not (GameSave.class_unlocked(_selected_class) and GameSave.weapon_unlocked(_selected_weapon))
 	begin_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _begin_run(_selected_class, _selected_weapon))
 	vbox.add_child(begin_btn)
-	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 44)
-	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
-	vbox.add_child(back_btn)
 
 func _pick_class(cid: String) -> void:
 	GameAudio.sfx("uiClick")
@@ -258,6 +330,8 @@ func _pick_class(cid: String) -> void:
 	_show_class_select()
 
 func _pick_weapon(wid: String) -> void:
+	if not GameSave.weapon_unlocked(wid):
+		return
 	GameAudio.sfx("uiClick")
 	_selected_weapon = wid
 	_show_class_select()
@@ -270,40 +344,59 @@ func _lock_text(u: Dictionary) -> String:
 
 func _show_shop() -> void:
 	var vbox := _menu_base()
-	var gold_lbl := Label.new(); gold_lbl.text = "Gold: %d" % GameSave.gold; vbox.add_child(gold_lbl)
+	var hdr := Label.new(); hdr.text = "Armory"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 22)
+	vbox.add_child(hdr)
+	var gold_lbl := Label.new(); gold_lbl.text = "Gold: %d" % GameSave.gold
+	gold_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_heading(gold_lbl, UiTheme.GOLD_BRIGHT, 16)
+	vbox.add_child(gold_lbl)
+	vbox.add_child(_spacer(8))
 
-	var upg_hdr := Label.new(); upg_hdr.text = "Permanent Upgrades"; vbox.add_child(upg_hdr)
+	var upg_hdr := Label.new(); upg_hdr.text = "PERMANENT UPGRADES"
+	UiTheme.style_heading(upg_hdr, UiTheme.GOLD_BRIGHT, 13)
+	vbox.add_child(upg_hdr)
 	for t in GameData.UPGRADE_TRACKS:
 		var id: String = t["id"]
 		var lvl: int = int(GameSave.upgrades.get(id, 0))
 		var maxed: bool = lvl >= int(t["max"])
 		var cost := GameData.upgrade_cost(id, lvl)
-		var row := Button.new()
-		row.custom_minimum_size = Vector2(400, 52)
+		var row := _make_button("")
+		row.custom_minimum_size = Vector2(400, 56)
+		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		row.disabled = maxed or GameSave.gold < cost
-		row.text = "%s  Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("MAX" if maxed else "%d g" % cost)]
+		row.text = "%s   Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("MAX" if maxed else "%d gold" % cost)]
 		row.pressed.connect(_buy_upgrade.bind(id))
 		vbox.add_child(row)
 
-	var unl_hdr := Label.new(); unl_hdr.text = "Unlocks"; vbox.add_child(unl_hdr)
+	var unl_hdr := Label.new(); unl_hdr.text = "UNLOCKS"
+	UiTheme.style_heading(unl_hdr, UiTheme.GOLD_BRIGHT, 13)
+	vbox.add_child(unl_hdr)
+	var any_unlocks := false
 	for cid in GameData.CLASSES:
 		var c: Dictionary = GameData.CLASSES[cid]
 		if c["unlock"]["type"] == "gold" and not GameSave.class_unlocked(cid):
+			any_unlocks = true
 			_shop_unlock_row(vbox, "%s (class)" % c["name"], int(c["unlock"]["cost"]), _buy_class_unlock.bind(cid, int(c["unlock"]["cost"])))
 	for wid in GameData.WEAPON_META:
 		var w: Dictionary = GameData.WEAPON_META[wid]
 		if w["unlock"]["type"] == "gold" and not GameSave.weapon_unlocked(wid):
+			any_unlocks = true
 			_shop_unlock_row(vbox, w["name"], int(w["unlock"]["cost"]), _buy_weapon_unlock.bind(wid, int(w["unlock"]["cost"])))
+	if not any_unlocks:
+		var none_lbl := Label.new(); none_lbl.text = "Everything gold can buy is unlocked."
+		UiTheme.style_muted(none_lbl)
+		vbox.add_child(none_lbl)
 
-	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+	vbox.add_child(_spacer(10))
+	var back_btn := _make_button("Back")
 	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
 
 func _shop_unlock_row(vbox: VBoxContainer, label: String, cost: int, handler: Callable) -> void:
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(400, 48)
+	var b := _make_button("%s — %d gold" % [label, cost])
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.disabled = GameSave.gold < cost
-	b.text = "%s — %d g" % [label, cost]
 	b.pressed.connect(handler)
 	vbox.add_child(b)
 
@@ -335,13 +428,30 @@ func _buy_weapon_unlock(wid: String, cost: int) -> void:
 
 func _show_achievements() -> void:
 	var vbox := _menu_base()
-	var hdr := Label.new(); hdr.text = "Achievements"; vbox.add_child(hdr)
+	var hdr := Label.new(); hdr.text = "Deeds"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 22)
+	vbox.add_child(hdr)
+	vbox.add_child(_spacer(6))
 	for a in GameData.ACHIEVEMENTS:
 		var done: bool = bool(GameSave.achievements.get(a["id"], false))
-		var row := Label.new()
-		row.text = "%s %s\n%s\nUnlocks: %s" % [("✓" if done else "—"), a["name"], a["desc"], a["unlocks"]]
-		vbox.add_child(row)
-	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
+		var inner := VBoxContainer.new()
+		panel.add_child(inner)
+		var title_row := Label.new()
+		title_row.text = ("✓ " if done else "") + a["name"]
+		UiTheme.style_heading(title_row, UiTheme.GOLD_BRIGHT if done else UiTheme.INK, 16)
+		inner.add_child(title_row)
+		var desc := Label.new(); desc.text = a["desc"]
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD
+		UiTheme.style_muted(desc, 13)
+		inner.add_child(desc)
+		var unlocks := Label.new(); unlocks.text = "Unlocks: %s" % a["unlocks"]
+		UiTheme.style_heading(unlocks, UiTheme.GOLD, 12)
+		inner.add_child(unlocks)
+		vbox.add_child(panel)
+	vbox.add_child(_spacer(10))
+	var back_btn := _make_button("Back")
 	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
 
@@ -369,20 +479,24 @@ func _show_pause() -> void:
 	_pause_ui.layer = 10
 	add_child(_pause_ui)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.7); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(10.0 / 255, 8.0 / 255, 6.0 / 255, 0.85); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_pause_ui.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(70, 260); vbox.custom_minimum_size = Vector2(340, 0)
+	vbox.theme = _ui_theme
+	vbox.position = Vector2(45, 300); vbox.custom_minimum_size = Vector2(300, 0)
 	vbox.add_theme_constant_override("separation", 12)
 	_pause_ui.add_child(vbox)
-	var hdr := Label.new(); hdr.text = "Paused"; vbox.add_child(hdr)
-	var resume_btn := Button.new(); resume_btn.text = "Resume"; resume_btn.custom_minimum_size = Vector2(300, 48)
+	var hdr := Label.new(); hdr.text = "Paused"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 26)
+	vbox.add_child(hdr)
+	vbox.add_child(_spacer(8))
+	var resume_btn := _make_button("Resume", true)
 	resume_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _resume_from_pause())
 	vbox.add_child(resume_btn)
-	var settings_btn := Button.new(); settings_btn.text = "Settings"; settings_btn.custom_minimum_size = Vector2(300, 48)
+	var settings_btn := _make_button("Settings")
 	settings_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_settings(_show_pause))
 	vbox.add_child(settings_btn)
-	var quit_btn := Button.new(); quit_btn.text = "Quit to Title"; quit_btn.custom_minimum_size = Vector2(300, 48)
+	var quit_btn := _make_button("Quit to Title")
 	quit_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _quit_run())
 	vbox.add_child(quit_btn)
 
@@ -414,26 +528,32 @@ func _show_settings(return_fn: Callable) -> void:
 	add_child(layer)
 	_settings_ui = layer
 	var dim := ColorRect.new()
-	dim.color = Color(0.06, 0.05, 0.04, 1.0); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = UiTheme.BG; dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(40, 220); vbox.custom_minimum_size = Vector2(400, 0)
+	vbox.theme = _ui_theme
+	vbox.position = Vector2(40, 260); vbox.custom_minimum_size = Vector2(400, 0)
 	vbox.add_theme_constant_override("separation", 14)
 	layer.add_child(vbox)
-	var hdr := Label.new(); hdr.text = "Settings"; vbox.add_child(hdr)
-	var vol_lbl := Label.new(); vol_lbl.text = "Volume"; vbox.add_child(vol_lbl)
+	var hdr := Label.new(); hdr.text = "Settings"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 26)
+	vbox.add_child(hdr)
+	vbox.add_child(_spacer(8))
+	var vol_lbl := Label.new(); vol_lbl.text = "Volume"
+	UiTheme.style_muted(vol_lbl, 14)
+	vbox.add_child(vol_lbl)
 	var slider := HSlider.new()
+	slider.theme = _ui_theme
 	slider.min_value = 0; slider.max_value = 100; slider.step = 1
 	slider.value = GameSave.volume * 100.0
 	slider.custom_minimum_size = Vector2(380, 32)
 	slider.value_changed.connect(_on_volume_changed)
 	vbox.add_child(slider)
-	var mute_btn := Button.new()
-	mute_btn.text = "🔇 Muted" if GameSave.muted else "🔊 Sound On"
-	mute_btn.custom_minimum_size = Vector2(400, 48)
+	var mute_btn := _make_button("Muted" if GameSave.muted else "Sound On")
 	mute_btn.pressed.connect(_toggle_mute.bind(mute_btn))
 	vbox.add_child(mute_btn)
-	var back_btn := Button.new(); back_btn.text = "Back"; back_btn.custom_minimum_size = Vector2(400, 48)
+	vbox.add_child(_spacer(8))
+	var back_btn := _make_button("Back")
 	back_btn.pressed.connect(func():
 		GameAudio.sfx("uiClick")
 		if _settings_ui == layer:
@@ -451,7 +571,7 @@ func _toggle_mute(btn: Button) -> void:
 	GameAudio.set_muted(GameSave.muted)
 	GameSave.save_data()
 	GameAudio.sfx("uiClick")
-	btn.text = "🔇 Muted" if GameSave.muted else "🔊 Sound On"
+	btn.text = "Muted" if GameSave.muted else "Sound On"
 
 func add_gold(amount: float) -> void:
 	run_gold += amount
@@ -658,23 +778,32 @@ func _open_level_up() -> void:
 func _build_level_cards(opts: Array) -> void:
 	_level_ui = CanvasLayer.new()
 	_level_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	_level_ui.layer = 10
 	add_child(_level_ui)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.6); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(10.0 / 255, 8.0 / 255, 6.0 / 255, 0.82); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_level_ui.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(40, 120); vbox.custom_minimum_size = Vector2(400, 0)
+	vbox.theme = _ui_theme
+	vbox.position = Vector2(30, 160); vbox.custom_minimum_size = Vector2(330, 0)
 	vbox.add_theme_constant_override("separation", 10)
 	_level_ui.add_child(vbox)
 	var title := Label.new()
-	title.text = "Level %d — choose:" % _player.level
+	title.text = "Level %d" % _player.level
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(title, 28)
 	vbox.add_child(title)
+	vbox.add_child(_spacer(8))
 	for opt in opts:
 		var def: Dictionary = opt["ability"]
 		var b := Button.new()
-		var tag := "NEW" if opt["is_new"] else "Rank %d→%d" % [opt["next_rank"] - 1, opt["next_rank"]]
-		b.text = "%s  %s [%s]\n%s" % [def["icon"], def["name"], tag, Abilities.describe(def, opt["next_rank"])]
-		b.custom_minimum_size = Vector2(400, 56)
+		b.theme = _ui_theme
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD
+		var tag := "NEW" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
+		b.text = "%s  [%s]\n%s" % [def["name"], tag, Abilities.describe(def, opt["next_rank"])]
+		b.custom_minimum_size = Vector2(330, 64)
+		UiTheme.accent_button_style(b, UiTheme.GOLD if opt["is_new"] else UiTheme.XP_COLOR, false)
 		b.pressed.connect(_pick_ability.bind(opt))
 		vbox.add_child(b)
 
@@ -777,25 +906,34 @@ func _build_hud() -> void:
 	_flash_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(_flash_overlay)
 
-	_lbl_level = Label.new(); _lbl_level.position = Vector2(12, 8); layer.add_child(_lbl_level)
-	_lbl_time = Label.new(); _lbl_time.position = Vector2(380, 8); layer.add_child(_lbl_time)
-	var hp_bg := ColorRect.new()
-	hp_bg.color = Color(0, 0, 0, 0.5); hp_bg.position = Vector2(12, 34); hp_bg.size = Vector2(_hp_w, 12)
+	_lbl_level = Label.new(); _lbl_level.position = Vector2(12, 8)
+	UiTheme.style_heading(_lbl_level, UiTheme.INK, 18)
+	layer.add_child(_lbl_level)
+	_lbl_time = Label.new(); _lbl_time.position = Vector2(340, 8)
+	UiTheme.style_heading(_lbl_time, UiTheme.GOLD_BRIGHT, 18)
+	layer.add_child(_lbl_time)
+
+	var hp_bg := Panel.new()
+	hp_bg.add_theme_stylebox_override("panel", _bar_bg_style())
+	hp_bg.position = Vector2(12, 34); hp_bg.size = Vector2(_hp_w, 12)
 	layer.add_child(hp_bg)
 	_hp_fill = ColorRect.new()
-	_hp_fill.color = Color("d23b3b"); _hp_fill.position = Vector2(12, 34); _hp_fill.size = Vector2(_hp_w, 12)
+	_hp_fill.color = UiTheme.HP_COLOR; _hp_fill.position = Vector2(13, 35); _hp_fill.size = Vector2(_hp_w - 2, 10)
 	layer.add_child(_hp_fill)
-	var ab_btn := Button.new()
-	ab_btn.text = "✦"; ab_btn.position = Vector2(390, 720); ab_btn.custom_minimum_size = Vector2(72, 72)
+
+	var ab_btn := _make_button("*")
+	ab_btn.position = Vector2(390, 712); ab_btn.custom_minimum_size = Vector2(72, 72)
+	ab_btn.add_theme_font_size_override("font_size", 26)
 	ab_btn.pressed.connect(func(): if _player: _player.use_movement_ability())
 	layer.add_child(ab_btn)
-	var pause_btn := Button.new()
-	pause_btn.text = "⏸"; pause_btn.position = Vector2(430, 4); pause_btn.custom_minimum_size = Vector2(44, 32)
+	var pause_btn := _make_button("||")
+	pause_btn.position = Vector2(426, 4); pause_btn.custom_minimum_size = Vector2(48, 32)
 	pause_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _open_pause())
 	layer.add_child(pause_btn)
 
 	# Boss health bar (hidden until a boss is present).
-	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 52)
+	_lbl_boss_name = Label.new(); _lbl_boss_name.position = Vector2(100, 50)
+	UiTheme.style_heading(_lbl_boss_name, UiTheme.MUTED, 13)
 	_lbl_boss_name.visible = false; layer.add_child(_lbl_boss_name)
 	_boss_bg = ColorRect.new()
 	_boss_bg.color = Color(0, 0, 0, 0.5); _boss_bg.position = Vector2(100, 70); _boss_bg.size = Vector2(_boss_w, 10)
@@ -806,10 +944,17 @@ func _build_hud() -> void:
 
 	# Event banner (mini-boss/final-boss announcements).
 	_lbl_banner = Label.new()
-	_lbl_banner.position = Vector2(60, 160); _lbl_banner.custom_minimum_size = Vector2(360, 0)
+	_lbl_banner.position = Vector2(30, 160); _lbl_banner.custom_minimum_size = Vector2(420, 0)
 	_lbl_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(_lbl_banner, 24)
 	_lbl_banner.visible = false
 	layer.add_child(_lbl_banner)
+
+func _bar_bg_style() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0, 0, 0, 0.55)
+	s.set_corner_radius_all(6)
+	return s
 
 func _update_hud() -> void:
 	_lbl_level.text = "Lv %d" % _player.level
@@ -893,24 +1038,34 @@ func _show_end_screen(title: String, fresh: Array) -> void:
 	_end_ui.layer = 10
 	add_child(_end_ui)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.7); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(10.0 / 255, 8.0 / 255, 6.0 / 255, 0.85); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_end_ui.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(70, 240); vbox.custom_minimum_size = Vector2(340, 0)
+	vbox.theme = _ui_theme
+	vbox.position = Vector2(45, 260); vbox.custom_minimum_size = Vector2(300, 0)
 	vbox.add_theme_constant_override("separation", 12)
 	_end_ui.add_child(vbox)
-	var t := Label.new(); t.text = title; vbox.add_child(t)
+	var t := Label.new(); t.text = title; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(t, 30)
+	vbox.add_child(t)
+	vbox.add_child(_spacer(8))
 	var stats := Label.new()
 	stats.text = "Time: %d:%02d\nKills: %d\nGold: +%d" % [int(elapsed) / 60, int(elapsed) % 60, run_kills, int(floor(run_gold))]
+	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_muted(stats, 15)
 	vbox.add_child(stats)
 	if not fresh.is_empty():
+		vbox.add_child(_spacer(6))
 		var lines := ["Unlocked!"]
 		for id in fresh:
 			var a: Dictionary = GameData.achievement_by_id(id)
 			lines.append("%s — %s" % [a["name"], a["unlocks"]])
 		var ul := Label.new(); ul.text = "\n".join(lines)
+		ul.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UiTheme.style_heading(ul, UiTheme.GOLD_BRIGHT, 14)
 		vbox.add_child(ul)
-	var btn := Button.new(); btn.text = "Continue"; btn.custom_minimum_size = Vector2(300, 48)
+	vbox.add_child(_spacer(8))
+	var btn := _make_button("Continue", true)
 	btn.pressed.connect(_return_to_title)
 	vbox.add_child(btn)
 
