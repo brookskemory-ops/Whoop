@@ -34,10 +34,10 @@ var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 # Juice: screen shake, level-up/pickup flash, torch lighting, low-HP vignette.
 var _shake := 0.0
 var _flash := 0.0
-var _canvas_mod: CanvasModulate
-var _torch: PointLight2D
+var _torch_overlay: TextureRect
 var _flash_overlay: ColorRect
 var _vignette: TextureRect
+const _TORCH_BASE_RADIUS := 288.0
 
 # Pause + settings
 var _pause_ui: CanvasLayer
@@ -78,7 +78,6 @@ func _ready() -> void:
 		_win_time = 12.0
 		_mini_times = [3.0, 6.0, 9.0]
 	_build_world()
-	_build_lighting()
 	_build_hud()
 	if _has_flag("--selftest"):
 		_begin_run(DEFAULT_TEST_CLASS, "")
@@ -115,33 +114,26 @@ func _build_world() -> void:
 	floor_spr.z_index = -100
 	_world.add_child(floor_spr)
 
-# ── Lighting: CanvasModulate darkens the world; a PointLight2D "torch" that
-# follows the player reveals a flickering radius around them (ported from the
-# torchFlicker/litR radial-gradient overlay in js/game.js's render()). Both
-# CanvasModulate and Light2D only affect the base canvas — the HUD/menu
-# CanvasLayers stay unaffected, matching the JS's canvas-vs-DOM split.
-func _build_lighting() -> void:
-	_canvas_mod = CanvasModulate.new()
-	_canvas_mod.color = Color(0.09, 0.08, 0.07, 1.0)
-	add_child(_canvas_mod)
-
-	_torch = PointLight2D.new()
-	_torch.texture = _make_radial_gradient_texture(Vector2(512, 512), Color(1, 1, 1, 1), Color(1, 1, 1, 0))
-	_torch.color = Color(1.0, 0.93, 0.8, 1.0)
-	_torch.energy = 1.5
-	add_child(_torch)
-
 func _make_radial_gradient_texture(size: Vector2, c0: Color, c1: Color) -> GradientTexture2D:
+	return _make_multistop_gradient_texture(size, [0.0, 1.0], [c0, c1], 0.5)
+
+# Multi-stop radial gradient texture (used for the torch-darkness overlay,
+# which needs the JS's exact 4-stop falloff). `fill_to_dist` is the UV
+# distance (from center) at which the gradient reaches its last stop; beyond
+# that, the texture stays clamped at the last color — same as a canvas radial
+# gradient. A texture much larger than fill_to_dist*2 gives comfortable
+# constant-color coverage past the gradient's "active" radius.
+func _make_multistop_gradient_texture(size: Vector2, offsets: Array, colors: Array, fill_to_dist: float) -> GradientTexture2D:
 	var g := Gradient.new()
-	g.colors = PackedColorArray([c0, c1])
-	g.offsets = PackedFloat32Array([0.0, 1.0])
+	g.offsets = PackedFloat32Array(offsets)
+	g.colors = PackedColorArray(colors)
 	var tex := GradientTexture2D.new()
 	tex.gradient = g
 	tex.width = int(size.x)
 	tex.height = int(size.y)
 	tex.fill = GradientTexture2D.FILL_RADIAL
 	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to = Vector2(1.0, 0.5)
+	tex.fill_to = Vector2(0.5 + fill_to_dist, 0.5)
 	return tex
 
 func add_shake(n: float) -> void:
@@ -517,8 +509,10 @@ func _update_visuals(delta: float) -> void:
 
 	var torch_flicker := sin(elapsed * 9.0) * 5.0 + sin(elapsed * 23.0) * 3.0
 	var lit_r := maxf(245.0, minf(get_viewport_rect().size.x, get_viewport_rect().size.y) * 0.6) + torch_flicker
-	_torch.global_position = _player.global_position
-	_torch.texture_scale = lit_r / 256.0
+	# The player is always at screen-center (instant 1:1 camera follow), so the
+	# overlay's fixed screen-center position never needs updating — only scale
+	# reproduces the flicker.
+	_torch_overlay.scale = Vector2.ONE * (lit_r / _TORCH_BASE_RADIUS)
 
 	_flash_overlay.color.a = minf(0.5, _flash) * 0.5
 
@@ -669,7 +663,6 @@ func _build_level_cards(opts: Array) -> void:
 	dim.color = Color(0, 0, 0, 0.6); dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_level_ui.add_child(dim)
 	var vbox := VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_CENTER)
 	vbox.position = Vector2(40, 120); vbox.custom_minimum_size = Vector2(400, 0)
 	vbox.add_theme_constant_override("separation", 10)
 	_level_ui.add_child(vbox)
@@ -742,6 +735,29 @@ func _sync_joy_visual() -> void:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+
+	# Torch darkness: a dark radial gradient drawn ON TOP of the fully-rendered
+	# world (never multiplicatively hides anything under it, unlike
+	# CanvasModulate) — ported from the torchFlicker/litR radial-gradient
+	# overlay in js/game.js's render(). Colors/stops match the JS exactly.
+	# fill_to_dist=0.15 on a 1920px-wide texture puts the gradient's outer stop
+	# at 0.15*1920 = 288px = _TORCH_BASE_RADIUS from center at scale 1.0; the
+	# rest of the 1920px extent (well past any phone screen's corner distance)
+	# stays clamped at the fully-dark outer color, exactly like a canvas
+	# radial gradient. Scaling the whole rect at runtime (cheap, no texture
+	# regen) reproduces the torchFlicker radius wobble.
+	_torch_overlay = TextureRect.new()
+	_torch_overlay.texture = _make_multistop_gradient_texture(
+		Vector2(1920, 1920),
+		[0.0, 0.55, 0.85, 1.0],
+		[Color(10.0 / 255, 8.0 / 255, 6.0 / 255, 0.0), Color(10.0 / 255, 8.0 / 255, 6.0 / 255, 0.12),
+		 Color(9.0 / 255, 7.0 / 255, 5.0 / 255, 0.62), Color(7.0 / 255, 6.0 / 255, 4.0 / 255, 0.97)],
+		0.15)
+	_torch_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_torch_overlay.size = Vector2(1920, 1920)
+	_torch_overlay.pivot_offset = Vector2(960, 960)
+	_torch_overlay.position = Vector2(240, 400) - Vector2(960, 960)
+	layer.add_child(_torch_overlay)
 
 	_joy_visual = preload("res://scripts/JoystickVisual.gd").new()
 	layer.add_child(_joy_visual)
