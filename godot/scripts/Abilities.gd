@@ -11,6 +11,8 @@ extends RefCounted
 # ring synced via sync_orbit(), "movement" fires on the ability button,
 # "passive" is applied once per rank via apply_passive() (no cooldown loop).
 const KIND := {
+	# universal passives (see passives())
+	"stat": "passive",
 	# legacy shared mechanics (rogue/cleric/barbarian, not yet redone)
 	"nova": "attack", "slam": "attack", "volley": "attack", "radial": "attack",
 	"chain": "attack", "orbit": "orbit", "dash": "movement", "blink": "movement",
@@ -29,6 +31,55 @@ static func _d(base: Dictionary, extra: Dictionary) -> Dictionary:
 	var out := base.duplicate()
 	for k in extra: out[k] = extra[k]
 	return out
+
+# Universal in-run passives. Unlike the class abilities above these are shared
+# by every class and appear in the level-up roll alongside them, so each choice
+# is a decision between deepening one ability and buffing the whole kit. Each
+# rank applies ONE `step` (see Player.apply_stat) — effects are incremental, not
+# recomputed. `mech` is "stat" so roll()/describe()/apply_pick() can treat them
+# uniformly with abilities. `per`/`suffix` drive the level-up card text.
+static func passives() -> Array:
+	return [
+		{"id": "ps_might", "name": "Might", "mech": "stat", "stat": "might", "icon_key": "might", "max_rank": 8, "step": 0.08, "per": 8, "suffix": "% damage", "flavor": "Sharpen every blow", "color": "ff8a5a"},
+		{"id": "ps_haste", "name": "Haste", "mech": "stat", "stat": "haste", "icon_key": "haste", "max_rank": 6, "step": 0.06, "per": 6, "suffix": "% faster abilities", "flavor": "Strike more often", "color": "ffe08a"},
+		{"id": "ps_reach", "name": "Reach", "mech": "stat", "stat": "reach", "icon_key": "reach", "max_rank": 6, "step": 0.12, "per": 12, "suffix": "% area", "flavor": "Widen every strike", "color": "8ad0ff"},
+		{"id": "ps_fortune", "name": "Fortune", "mech": "stat", "stat": "fortune", "icon_key": "fortune", "max_rank": 6, "step": 0.04, "per": 4, "suffix": "% crit chance", "flavor": "Court a luckier edge", "color": "f5e08a"},
+		{"id": "ps_precision", "name": "Precision", "mech": "stat", "stat": "precision", "icon_key": "precision", "max_rank": 5, "step": 0.15, "per": 15, "suffix": "% crit damage", "flavor": "Make every crit count", "color": "ffd0a0"},
+		{"id": "ps_swift", "name": "Swiftness", "mech": "stat", "stat": "swift", "icon_key": "swift", "max_rank": 5, "step": 0.06, "per": 6, "suffix": "% move speed", "flavor": "Outpace the horde", "color": "a0f0c0"},
+		{"id": "ps_vigor", "name": "Vigor", "mech": "stat", "stat": "vigor", "icon_key": "vigor", "max_rank": 6, "step": 20.0, "per": 20, "suffix": " max health", "flavor": "Endure a heavier toll", "color": "ff6a6a"},
+		{"id": "ps_growth", "name": "Growth", "mech": "stat", "stat": "growth", "icon_key": "growth", "max_rank": 5, "step": 0.12, "per": 12, "suffix": "% experience", "flavor": "Learn from every kill", "color": "c8a0ff"},
+		{"id": "ps_greed", "name": "Greed", "mech": "stat", "stat": "greed", "icon_key": "greed", "max_rank": 5, "step": 0.15, "per": 15, "suffix": "% gold", "flavor": "Pry loose more coin", "color": "f5d24a"},
+	]
+
+static func passive_by_id(id: String) -> Dictionary:
+	for p in passives():
+		if p["id"] == id:
+			return p
+	return {}
+
+# Weapon evolutions — the survivors-like payoff for committing to a build. Each
+# reuses an existing mech with beefed numbers + an extra effect, and is offered
+# (once) only when its base ability is maxed AND its paired passive has reached
+# `req_rank`. `replaces` names the base ability that is swapped out on pick;
+# `max_rank` is 1 so an evolution can't be re-rolled. See roll()/Player.apply_pick.
+static func evolutions() -> Array:
+	return [
+		{"id": "kn_whirl_evo", "name": "Bladestorm", "mech": "sword_orbit", "icon_key": "orbit", "max_rank": 1, "evo": true,
+			"replaces": "kn_whirl", "requires": "ps_might", "req_rank": 3,
+			"flavor": "A storm of blades encircles you", "count": 6, "count_step": 0, "dmg": 1.1, "dmg_step": 0.0, "dist": 88.0, "speed": 4.2, "size": 20.0, "color": "eaf0ff"},
+		{"id": "ar_multi_evo", "name": "Arrow Storm", "mech": "arrow_fan", "icon_key": "volley", "max_rank": 1, "evo": true,
+			"replaces": "ar_multi", "requires": "ps_haste", "req_rank": 3,
+			"flavor": "Loose an unending storm of arrows", "cd": 0.6, "cd_step": 0.0, "count": 9, "count_step": 0, "dmg": 0.85, "pierce": 3, "size": 6.0, "spread": 1.4, "color": "d6f5d6"},
+		{"id": "mg_firenova_evo", "name": "Inferno", "mech": "fire_nova", "icon_key": "nova", "max_rank": 1, "evo": true,
+			"replaces": "mg_firenova", "requires": "ps_reach", "req_rank": 3,
+			"flavor": "A firestorm engulfs all around you", "cd": 1.6, "cd_step": 0.0, "rad": 150.0, "rad_step": 0.0, "dmg": 1.4, "dmg_step": 0.0, "burn": 6.0, "burn_time": 3.0, "color": "ff5a1a"},
+	]
+
+static func evolution_by_id(id: String) -> Dictionary:
+	for e in evolutions():
+		if e["id"] == id:
+			return e
+	return {}
 
 # Per-class ability pools. Knight/Archer/Mage: every mechanic below is used
 # by exactly one class in the whole roster. Rogue/Cleric/Barbarian keep the
@@ -102,7 +153,12 @@ static func by_id(id: String) -> Dictionary:
 		for a in by_class()[cls]:
 			if a["id"] == id:
 				return a
-	return {}
+	# Universal passives and evolutions live in their own pools but share the
+	# skills[] array, so lookups (physics loop, owned_ranks) must resolve them too.
+	var ps := passive_by_id(id)
+	if not ps.is_empty():
+		return ps
+	return evolution_by_id(id)
 
 static func kind_of(def: Dictionary) -> String:
 	return KIND[def["mech"]]
@@ -119,6 +175,12 @@ static func cooldown(def: Dictionary, rank: int) -> float:
 static func describe(def: Dictionary, rank: int) -> String:
 	var f: String = def["flavor"]
 	match def["mech"]:
+		"stat":
+			# Cumulative bonus at this rank (e.g. "+16% damage" at Might rank 2).
+			var total: float = def["per"] * rank
+			var sign := "-" if def["stat"] == "haste" else "+"
+			var num := "%d" % roundi(total)
+			return "%s — %s%s%s" % [f, sign, num, def["suffix"]]
 		"nova", "slam", "guard_break", "seismic_slam", "fire_nova":
 			return "%s — %d%% dmg, %d radius" % [f, roundi((def["dmg"] + def.get("dmg_step", 0.0) * (rank - 1)) * 100), roundi(def["rad"] + def.get("rad_step", 0.0) * (rank - 1))]
 		"meteor_crater":
@@ -385,12 +447,61 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			Vfx.ring(world, player.global_position, col, rad if has_impact else 40.0, 0.3)
 			player.invuln = maxf(player.invuln, 0.4)
 
-# Roll n level-up options: each is NEW (rank 1) or a RANK-UP of an owned ability.
-static func roll(class_id: String, owned: Dictionary, n: int) -> Array:
-	var pool := []
+# Roll n level-up options: each is NEW (rank 1) or a RANK-UP of an owned
+# ability/passive. Abilities and universal passives are drawn from separate
+# pools and composed so passives never crowd out ability choices — at most
+# `max_passives` of the n cards are passives, the rest abilities (falling back
+# to whichever pool still has entries once one is exhausted).
+static func roll(class_id: String, owned: Dictionary, n: int, max_passives: int = 2) -> Array:
+	var ability_pool := []
 	for ab in by_class().get(class_id, []):
 		var cur: int = owned.get(ab["id"], 0)
 		if cur < ab["max_rank"]:
-			pool.append({"ability": ab, "is_new": cur == 0, "next_rank": cur + 1})
-	pool.shuffle()
-	return pool.slice(0, n)
+			ability_pool.append({"ability": ab, "is_new": cur == 0, "next_rank": cur + 1})
+	var passive_pool := []
+	for ps in passives():
+		var cur: int = owned.get(ps["id"], 0)
+		if cur < ps["max_rank"]:
+			passive_pool.append({"ability": ps, "is_new": cur == 0, "next_rank": cur + 1})
+	ability_pool.shuffle()
+	passive_pool.shuffle()
+	var out := []
+	out.append_array(passive_pool.slice(0, max_passives))
+	for opt in ability_pool:
+		if out.size() >= n: break
+		out.append(opt)
+	# Backfill from passives if abilities ran dry (e.g. everything maxed).
+	for opt in passive_pool.slice(max_passives):
+		if out.size() >= n: break
+		out.append(opt)
+	out.shuffle()
+	out = out.slice(0, n)
+	# Evolutions take priority: any eligible-and-unowned evolution is prepended as
+	# a golden card, displacing the last rolled option so the count stays at n.
+	var evos := eligible_evolutions(class_id, owned)
+	for evo in evos:
+		out.push_front(evo)
+	return out.slice(0, n)
+
+# Evolution cards whose base ability is maxed and paired passive has reached its
+# threshold, and which aren't already owned. Marked is_evo for gold card styling.
+static func eligible_evolutions(class_id: String, owned: Dictionary) -> Array:
+	var out := []
+	for evo in evolutions():
+		var base := by_class_lookup(class_id, evo["replaces"])
+		if base.is_empty():
+			continue   # evolution belongs to another class
+		if owned.get(evo["id"], 0) > 0:
+			continue   # already evolved
+		if owned.get(evo["replaces"], 0) < base["max_rank"]:
+			continue   # base not maxed
+		if owned.get(evo["requires"], 0) < evo["req_rank"]:
+			continue   # paired passive not yet high enough
+		out.append({"ability": evo, "is_new": true, "next_rank": 1, "is_evo": true})
+	return out
+
+static func by_class_lookup(class_id: String, id: String) -> Dictionary:
+	for a in by_class().get(class_id, []):
+		if a["id"] == id:
+			return a
+	return {}
