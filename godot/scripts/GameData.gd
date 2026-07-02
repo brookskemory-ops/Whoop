@@ -105,10 +105,12 @@ func achievement_by_id(id: String) -> Dictionary:
 # player.level (character XP progression), which is unrelated.
 const STAGES := [
 	{"id": "forest", "name": "Ashwood Vale", "tileset": "forest", "lighting": "bright",
+		"blurb": "Sunlit woods, open ground and light cover.",
 		"unlock": {"type": "default"}, "bounds": Vector2(4000.0, 4000.0), "obstacle_density": 0.12,
 		"obstacle_textures": ["res://assets/map/obstacles/forest_tree.png", "res://assets/map/obstacles/forest_tree.png",
 			"res://assets/map/obstacles/forest_rock.png", "res://assets/map/obstacles/forest_bush.png"]},
 	{"id": "dungeon", "name": "The Sunken Vault", "tileset": "dungeon", "lighting": "torch",
+		"blurb": "Torch-lit ruin, tight quarters and dense cover.",
 		"unlock": {"type": "stage_clear", "stage": "forest"}, "bounds": Vector2(3600.0, 3600.0), "obstacle_density": 0.15,
 		"obstacle_textures": ["res://assets/map/obstacles/dungeon_pillar.png", "res://assets/map/obstacles/dungeon_rubble.png",
 			"res://assets/map/obstacles/forest_rock.png"]},
