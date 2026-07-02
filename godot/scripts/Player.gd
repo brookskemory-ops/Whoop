@@ -25,6 +25,11 @@ var aoe_mult := 1.0
 var crit_mult := 2.0
 var proj_count := 1
 var cooldown_mult := 1.0    # in-run Haste passive; <1 = faster ability/attack cadence
+# Synergy keystones (Abilities.keystones()): consumed in Abilities.activate /
+# use_movement_ability. 0 = not taken.
+var fire_burn_bonus := 0.0  # Kindling: burn dps applied by every fire ability
+var fire_burn_time := 0.0   # Kindling: burn duration
+var movement_nova := 0.0    # Momentum: damage mult of the on-arrival nova
 
 # Permanent meta-upgrades (applied in setup() from GameSave.class_upgrades).
 var revives := 0
@@ -196,6 +201,10 @@ func use_movement_ability() -> void:
 		if Abilities.kind_of(def) == "movement" and s["timer"] <= 0.0:
 			Abilities.activate(def, self, main, s["rank"])
 			GameAudio.sfx("cast")
+			# Momentum keystone: crash down at the destination after the move.
+			if movement_nova > 0.0 and main.has_method("area_damage"):
+				main.area_damage(global_position, 70.0, movement_nova, {"color": Color("a0f0c0")})
+				Vfx.ring(main.get_node("World"), global_position, Color("a0f0c0"), 60.0, 0.3)
 			s["timer"] = Abilities.cooldown(def, s["rank"]) * cooldown_mult
 			return
 
@@ -227,6 +236,8 @@ func apply_pick(option: Dictionary) -> void:
 		Abilities.sync_orbit(def, self, inst["rank"])
 	elif def["mech"] == "stat":
 		apply_stat(def)
+	elif def["mech"] == "keystone":
+		apply_keystone(def)
 	elif Abilities.kind_of(def) == "passive":
 		Abilities.apply_passive(def, self, inst["rank"])
 
@@ -243,6 +254,16 @@ func evolve_replace(base_id: String) -> void:
 				if is_instance_valid(o["node"]):
 					o["node"].queue_free()
 			orbit_groups.remove_at(i)
+
+## Apply a synergy keystone (see Abilities.keystones()) — sets a one-shot flag
+## consumed by the abilities of the matching theme.
+func apply_keystone(def: Dictionary) -> void:
+	match def["requires_tag"]:
+		"fire":
+			fire_burn_bonus = def["burn"]
+			fire_burn_time = def["burn_time"]
+		"movement":
+			movement_nova = def["dmg"]
 
 ## Apply ONE rank's worth of a universal passive (see Abilities.passives()).
 ## Called once per pick, so effects accumulate incrementally rather than being

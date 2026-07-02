@@ -1135,7 +1135,16 @@ func _level_card(opt: Dictionary) -> Control:
 	var def: Dictionary = opt["ability"]
 	var is_new: bool = opt["is_new"]
 	var is_evo: bool = opt.get("is_evo", false)
-	var accent: Color = UiTheme.GOLD_BRIGHT if is_evo else (UiTheme.GOLD if is_new else UiTheme.XP_COLOR)
+	var is_keystone: bool = opt.get("is_keystone", false)
+	var accent: Color
+	if is_evo:
+		accent = UiTheme.GOLD_BRIGHT
+	elif is_keystone:
+		accent = Color(def["color"])   # themed accent (fire = orange, movement = green)
+	elif is_new:
+		accent = UiTheme.GOLD
+	else:
+		accent = UiTheme.XP_COLOR
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var cs := StyleBoxFlat.new()
@@ -1172,7 +1181,14 @@ func _level_card(opt: Dictionary) -> Control:
 	UiTheme.style_heading(name_lbl, accent, 15)
 	title_row.add_child(name_lbl)
 	var tag_lbl := Label.new()
-	tag_lbl.text = "Evolved" if is_evo else ("New" if is_new else "Rank %d → %d" % [opt["next_rank"] - 1, opt["next_rank"]])
+	if is_evo:
+		tag_lbl.text = "Evolved"
+	elif is_keystone:
+		tag_lbl.text = "Keystone"
+	elif is_new:
+		tag_lbl.text = "New"
+	else:
+		tag_lbl.text = "Rank %d → %d" % [opt["next_rank"] - 1, opt["next_rank"]]
 	tag_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UiTheme.style_muted(tag_lbl, 11)
 	title_row.add_child(tag_lbl)
@@ -1823,8 +1839,46 @@ func _run_buildtest() -> void:
 		if s["id"] == "kn_whirl": base_gone = false
 	var evo_ok: bool = evo_offered and evo_gated and has_evo and base_gone
 
-	print("[BUILDTEST] cap_ok=%s passives=%d stats_ok=%s reach_miss=%s reach_hit=%s evo_ok=%s cd_mult=%.2f" % [
-		str(cap_ok), n_pass, str(stats_ok), str(missed_at_1), str(hit_at_boost), str(evo_ok), _player.cooldown_mult])
+	# 5) Keystone gating: Kindling absent with only a non-fire ability owned,
+	#    present once a fire ability is owned.
+	var ks_gated := true
+	for o in Abilities.roll("mage", {"mg_frostbolt": 1}, 8, 2):
+		if o.get("is_keystone", false) and o["ability"]["id"] == "ks_kindling": ks_gated = false
+	var ks_opt := {}
+	for o in Abilities.roll("mage", {"mg_firenova": 1}, 8, 2):
+		if o.get("is_keystone", false) and o["ability"]["id"] == "ks_kindling": ks_opt = o
+	# Kindling effect: a fire ability now ignites an enemy that has no innate burn.
+	if not ks_opt.is_empty(): _player.apply_pick(ks_opt)
+	var kindling_set: bool = _player.fire_burn_bonus > 0.0
+	var burn_target := add_enemy("skeleton", _player.global_position + Vector2(20, 0), 1.0)
+	Abilities.activate(Abilities.by_id("mg_firenova"), _player, self, 1)
+	var burn_applied: bool = burn_target.burn_until > elapsed
+
+	# 6) Momentum: offered with a movement ability owned; sets movement_nova; the
+	#    on-arrival nova (fired at the pre-dash position) damages a nearby enemy.
+	var mo_opt := {}
+	for o in Abilities.roll("knight", {"kn_charge": 1}, 8, 2):
+		if o.get("is_keystone", false) and o["ability"]["id"] == "ks_momentum": mo_opt = o
+	if not mo_opt.is_empty(): _player.apply_pick(mo_opt)
+	var momentum_set: bool = _player.movement_nova > 0.0
+	_player.apply_pick({"ability": Abilities.by_id("kn_charge"), "is_new": true, "next_rank": 1})
+	for s in _player.skills:
+		if s["id"] == "kn_charge": s["timer"] = 0.0
+	var mo_target := add_enemy("skeleton", _player.global_position + Vector2(12, 0), 1.0)
+	var mo_hp0: float = mo_target.hp
+	_player.use_movement_ability()
+	var momentum_hit: bool = mo_target.hp < mo_hp0
+
+	# 7) The second-wave evolution gates on its own pairing (base maxed + passive).
+	var slam_evo_offered := false
+	for o in Abilities.roll("knight", {"kn_slam": 5, "ps_reach": 3}, 8, 2):
+		if o.get("is_evo", false) and o["ability"]["id"] == "kn_slam_evo": slam_evo_offered = true
+
+	var keystone_ok: bool = ks_gated and not ks_opt.is_empty() and kindling_set and burn_applied \
+		and momentum_set and momentum_hit
+	print("[BUILDTEST] cap_ok=%s passives=%d stats_ok=%s reach_miss=%s reach_hit=%s evo_ok=%s keystone_ok=%s evo2_ok=%s cd_mult=%.2f" % [
+		str(cap_ok), n_pass, str(stats_ok), str(missed_at_1), str(hit_at_boost), str(evo_ok),
+		str(keystone_ok), str(slam_evo_offered), _player.cooldown_mult])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,
