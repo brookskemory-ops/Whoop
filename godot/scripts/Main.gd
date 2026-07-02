@@ -468,7 +468,7 @@ func _show_shop() -> void:
 
 	# Upgrades are per-character — a small class-picker row lets the player
 	# choose whose track they're viewing/buying (defaults to last-selected).
-	var upg_hdr := Label.new(); upg_hdr.text = "PERMANENT UPGRADES"
+	var upg_hdr := Label.new(); upg_hdr.text = "Permanent Upgrades"
 	UiTheme.style_heading(upg_hdr, UiTheme.GOLD_BRIGHT, 13)
 	vbox.add_child(upg_hdr)
 	var class_row := HBoxContainer.new()
@@ -499,11 +499,11 @@ func _show_shop() -> void:
 		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		row.add_theme_font_size_override("font_size", 15)
 		row.disabled = maxed or GameSave.gold < cost
-		row.text = "%s   Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("MAX" if maxed else "%d gold" % cost)]
+		row.text = "%s   Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("Maxed" if maxed else "%d gold" % cost)]
 		row.pressed.connect(_buy_upgrade.bind(id))
 		vbox.add_child(row)
 
-	var unl_hdr := Label.new(); unl_hdr.text = "UNLOCKS"
+	var unl_hdr := Label.new(); unl_hdr.text = "Unlocks"
 	UiTheme.style_heading(unl_hdr, UiTheme.GOLD_BRIGHT, 13)
 	vbox.add_child(unl_hdr)
 	var any_unlocks := false
@@ -1003,7 +1003,7 @@ func _build_level_cards(opts: Array) -> void:
 		var text_col := VBoxContainer.new()
 		text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text_col)
-		var tag := "NEW" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
+		var tag := "New" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
 		var name_lbl := Label.new()
 		name_lbl.text = "%s  [%s]" % [def["name"], tag]
 		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
