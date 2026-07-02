@@ -11,8 +11,8 @@ extends RefCounted
 # ring synced via sync_orbit(), "movement" fires on the ability button,
 # "passive" is applied once per rank via apply_passive() (no cooldown loop).
 const KIND := {
-	# universal passives (see passives())
-	"stat": "passive",
+	# universal passives (see passives()) and synergy keystones (see keystones())
+	"stat": "passive", "keystone": "passive",
 	# legacy shared mechanics (rogue/cleric/barbarian, not yet redone)
 	"nova": "attack", "slam": "attack", "volley": "attack", "radial": "attack",
 	"chain": "attack", "orbit": "orbit", "dash": "movement", "blink": "movement",
@@ -73,12 +73,56 @@ static func evolutions() -> Array:
 		{"id": "mg_firenova_evo", "name": "Inferno", "mech": "fire_nova", "icon_key": "nova", "max_rank": 1, "evo": true,
 			"replaces": "mg_firenova", "requires": "ps_reach", "req_rank": 3,
 			"flavor": "A firestorm engulfs all around you", "cd": 1.6, "cd_step": 0.0, "rad": 150.0, "rad_step": 0.0, "dmg": 1.4, "dmg_step": 0.0, "burn": 6.0, "burn_time": 3.0, "color": "ff5a1a"},
+		{"id": "ar_ricochet_evo", "name": "Chain Volley", "mech": "ricochet", "icon_key": "ricochet", "max_rank": 1, "evo": true,
+			"replaces": "ar_ricochet", "requires": "ps_fortune", "req_rank": 3,
+			"flavor": "A shot that caroms endlessly through the horde", "cd": 1.2, "cd_step": 0.0, "dmg": 1.0, "bounces": 7, "bounce_step": 0, "speed": 440.0, "size": 7.0, "color": "d6f5d6"},
+		{"id": "kn_slam_evo", "name": "Tectonic Slam", "mech": "seismic_slam", "icon_key": "slam", "max_rank": 1, "evo": true,
+			"replaces": "kn_slam", "requires": "ps_reach", "req_rank": 3,
+			"flavor": "The earth splits in a colossal shockwave", "cd": 2.6, "cd_step": 0.0, "rad": 160.0, "rad_step": 0.0, "dmg": 2.6, "dmg_step": 0.0, "knock": 260.0, "color": "d8c49a"},
 	]
 
 static func evolution_by_id(id: String) -> Dictionary:
 	for e in evolutions():
 		if e["id"] == id:
 			return e
+	return {}
+
+# Ability "tags" the synergy keystones read. Derived from mech (rather than hand-
+# tagging every def): "movement" is any movement-kind mech; "fire" is the mage's
+# flame mechs (incl. the Inferno evolution, which reuses fire_nova).
+const FIRE_MECHS := ["fire_nova", "meteor_crater", "cinder_field"]
+
+static func def_has_tag(def: Dictionary, tag: String) -> bool:
+	if def.is_empty():
+		return false
+	if tag == "movement":
+		return KIND.get(def.get("mech", ""), "") == "movement"
+	if tag == "fire":
+		return def.get("mech", "") in FIRE_MECHS
+	return false
+
+static func owns_tag(owned: Dictionary, tag: String) -> bool:
+	for id in owned:
+		if owned[id] > 0 and def_has_tag(by_id(id), tag):
+			return true
+	return false
+
+# Synergy keystones — rare, build-defining picks that transform every ability of a
+# theme rather than a single one. Offered (once) only when the player owns at least
+# one ability with the matching tag. Same option shape as passives; the effect is a
+# player flag consumed in activate()/use_movement_ability().
+static func keystones() -> Array:
+	return [
+		{"id": "ks_kindling", "name": "Kindling", "mech": "keystone", "requires_tag": "fire", "max_rank": 1, "icon_key": "nova",
+			"flavor": "Your flames cling and spread — every fire ability sets foes ablaze", "color": "ff7a2a", "burn": 5.0, "burn_time": 2.5},
+		{"id": "ks_momentum", "name": "Momentum", "mech": "keystone", "requires_tag": "movement", "max_rank": 1, "icon_key": "dash",
+			"flavor": "You crash down where you land — movement abilities detonate on arrival", "color": "a0f0c0", "dmg": 1.2, "rad": 70.0},
+	]
+
+static func keystone_by_id(id: String) -> Dictionary:
+	for k in keystones():
+		if k["id"] == id:
+			return k
 	return {}
 
 # Per-class ability pools. Knight/Archer/Mage: every mechanic below is used
@@ -158,7 +202,10 @@ static func by_id(id: String) -> Dictionary:
 	var ps := passive_by_id(id)
 	if not ps.is_empty():
 		return ps
-	return evolution_by_id(id)
+	var ev := evolution_by_id(id)
+	if not ev.is_empty():
+		return ev
+	return keystone_by_id(id)
 
 static func kind_of(def: Dictionary) -> String:
 	return KIND[def["mech"]]
@@ -181,6 +228,8 @@ static func describe(def: Dictionary, rank: int) -> String:
 			var sign := "-" if def["stat"] == "haste" else "+"
 			var num := "%d" % roundi(total)
 			return "%s — %s%s%s" % [f, sign, num, def["suffix"]]
+		"keystone":
+			return f   # keystone flavor already states the whole effect
 		"nova", "slam", "guard_break", "seismic_slam", "fire_nova":
 			return "%s — %d%% dmg, %d radius" % [f, roundi((def["dmg"] + def.get("dmg_step", 0.0) * (rank - 1)) * 100), roundi(def["rad"] + def.get("rad_step", 0.0) * (rank - 1))]
 		"meteor_crater":
@@ -259,6 +308,10 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			if def.has("slow"): opts["slow"] = def["slow"]
 			if def.has("knock"): opts["knockback"] = def["knock"]
 			if def.has("burn"): opts["burn_dps"] = def["burn"]; opts["burn_time"] = def.get("burn_time", 2.0)
+			# Kindling keystone: every fire ability ignites, even those without burn.
+			if def["mech"] in FIRE_MECHS and player.fire_burn_bonus > 0.0:
+				opts["burn_dps"] = maxf(opts.get("burn_dps", 0.0), player.fire_burn_bonus)
+				opts["burn_time"] = maxf(opts.get("burn_time", 0.0), player.fire_burn_time)
 			main.area_damage(player.global_position, rad, mult, opts)
 			var world := main.get_node("World")
 			Vfx.ring(world, player.global_position, col, rad, 0.35)
@@ -281,7 +334,11 @@ static func activate(def: Dictionary, player: Player, main: Node, rank: int) -> 
 			if t == null: return
 			var rad: float = def["rad"] + def.get("rad_step", 0.0) * (rank - 1)
 			var mult: float = def["dmg"] + def.get("dmg_step", 0.0) * (rank - 1)
-			main.area_damage(t.global_position, rad, mult, {"color": col})
+			var opts := {"color": col}
+			if player.fire_burn_bonus > 0.0:   # Kindling: meteor impact also ignites
+				opts["burn_dps"] = player.fire_burn_bonus
+				opts["burn_time"] = player.fire_burn_time
+			main.area_damage(t.global_position, rad, mult, opts)
 			main.spawn_zone(t.global_position, rad * 0.8, def.get("zone_dps", 4.0), def.get("zone_time", 2.5), col)
 			var world := main.get_node("World")
 			Vfx.ring(world, t.global_position, col, rad, 0.35)
@@ -476,12 +533,25 @@ static func roll(class_id: String, owned: Dictionary, n: int, max_passives: int 
 		out.append(opt)
 	out.shuffle()
 	out = out.slice(0, n)
-	# Evolutions take priority: any eligible-and-unowned evolution is prepended as
-	# a golden card, displacing the last rolled option so the count stays at n.
-	var evos := eligible_evolutions(class_id, owned)
-	for evo in evos:
+	# Keystones and evolutions take priority: any eligible-and-unowned one is
+	# prepended as a special card, displacing the last rolled option so the count
+	# stays at n. (Evolutions pushed last → sit first, ahead of keystones.)
+	for ks in eligible_keystones(owned):
+		out.push_front(ks)
+	for evo in eligible_evolutions(class_id, owned):
 		out.push_front(evo)
 	return out.slice(0, n)
+
+# Keystone cards whose required tag is owned and which aren't already taken.
+static func eligible_keystones(owned: Dictionary) -> Array:
+	var out := []
+	for ks in keystones():
+		if owned.get(ks["id"], 0) > 0:
+			continue
+		if not owns_tag(owned, ks["requires_tag"]):
+			continue
+		out.append({"ability": ks, "is_new": true, "next_rank": 1, "is_keystone": true})
+	return out
 
 # Evolution cards whose base ability is maxed and paired passive has reached its
 # threshold, and which aren't already owned. Marked is_evo for gold card styling.
