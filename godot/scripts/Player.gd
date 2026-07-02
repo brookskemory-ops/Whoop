@@ -24,6 +24,7 @@ var pierce := 0
 var aoe_mult := 1.0
 var crit_mult := 2.0
 var proj_count := 1
+var cooldown_mult := 1.0    # in-run Haste passive; <1 = faster ability/attack cadence
 
 # Permanent meta-upgrades (applied in setup() from GameSave.class_upgrades).
 var revives := 0
@@ -169,7 +170,7 @@ func _physics_process(delta: float) -> void:
 		if _attack_timer <= 0.0:
 			Weapons.fire(weapon_id, self, main)
 			GameAudio.sfx("cast")
-			_attack_timer = attack_cooldown
+			_attack_timer = attack_cooldown * cooldown_mult
 			_atk_t = 0.3
 
 	# Active abilities: attack abilities auto-fire on their cooldown.
@@ -180,7 +181,7 @@ func _physics_process(delta: float) -> void:
 			if s["timer"] <= 0.0:
 				Abilities.activate(def, self, main, s["rank"])
 				GameAudio.sfx("cast")
-				s["timer"] = Abilities.cooldown(def, s["rank"])
+				s["timer"] = Abilities.cooldown(def, s["rank"]) * cooldown_mult
 				_atk_t = 0.3
 		elif s["timer"] > 0.0:
 			s["timer"] -= delta
@@ -195,7 +196,7 @@ func use_movement_ability() -> void:
 		if Abilities.kind_of(def) == "movement" and s["timer"] <= 0.0:
 			Abilities.activate(def, self, main, s["rank"])
 			GameAudio.sfx("cast")
-			s["timer"] = Abilities.cooldown(def, s["rank"])
+			s["timer"] = Abilities.cooldown(def, s["rank"]) * cooldown_mult
 			return
 
 func start_dash(dir: Vector2, dist: float, hit_mult: float) -> void:
@@ -211,6 +212,9 @@ func owned_ranks() -> Dictionary:
 
 func apply_pick(option: Dictionary) -> void:
 	var def: Dictionary = option["ability"]
+	# Evolutions swap out the base ability (and its orbit group) before adding.
+	if option.get("is_evo", false) and def.has("replaces"):
+		evolve_replace(def["replaces"])
 	var inst = null
 	for s in skills:
 		if s["id"] == def["id"]:
@@ -221,8 +225,40 @@ func apply_pick(option: Dictionary) -> void:
 	inst["rank"] = option["next_rank"]
 	if Abilities.kind_of(def) == "orbit":
 		Abilities.sync_orbit(def, self, inst["rank"])
+	elif def["mech"] == "stat":
+		apply_stat(def)
 	elif Abilities.kind_of(def) == "passive":
 		Abilities.apply_passive(def, self, inst["rank"])
+
+## Remove a base ability that an evolution replaces: drop its skill entry and,
+## if it was an orbital, free its orbiting nodes and group so the evolved form
+## doesn't stack a second ring.
+func evolve_replace(base_id: String) -> void:
+	for i in range(skills.size() - 1, -1, -1):
+		if skills[i]["id"] == base_id:
+			skills.remove_at(i)
+	for i in range(orbit_groups.size() - 1, -1, -1):
+		if orbit_groups[i].get("key", "") == base_id:
+			for o in orbit_groups[i]["orbs"]:
+				if is_instance_valid(o["node"]):
+					o["node"].queue_free()
+			orbit_groups.remove_at(i)
+
+## Apply ONE rank's worth of a universal passive (see Abilities.passives()).
+## Called once per pick, so effects accumulate incrementally rather than being
+## recomputed from rank — percentage stats compound, flat stats add.
+func apply_stat(def: Dictionary) -> void:
+	var step: float = def["step"]
+	match def["stat"]:
+		"might":     damage *= 1.0 + step
+		"swift":     move_speed *= 1.0 + step
+		"reach":     aoe_mult *= 1.0 + step; proj_size *= 1.0 + step * 0.5
+		"haste":     cooldown_mult *= 1.0 - step
+		"fortune":   crit += step
+		"precision": crit_mult += step
+		"vigor":     max_hp += step; hp = min(max_hp, hp + step)
+		"growth":    fortune_xp *= 1.0 + step
+		"greed":     fortune_gold *= 1.0 + step
 
 func sync_orbit_group(key: String, count: int, mult: float, dist: float, speed: float, r: float, col: Color) -> void:
 	for g in orbit_groups:

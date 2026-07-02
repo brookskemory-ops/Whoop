@@ -116,6 +116,8 @@ func _ready() -> void:
 		_run_progresstest()
 	elif _has_flag("--juicetest"):
 		_run_juicetest()
+	elif _has_flag("--buildtest"):
+		_run_buildtest()
 	else:
 		_show_title()
 
@@ -992,7 +994,8 @@ func dir_to_nearest(pos: Vector2) -> float:
 	return (t.global_position - pos).angle() if t != null else randf() * TAU
 
 func area_damage(center: Vector2, radius: float, mult: float, opts: Dictionary) -> void:
-	area_damage_amount(center, radius, _player.damage * mult, opts)
+	# Reach passive: the player's area multiplier widens direct-cast blasts.
+	area_damage_amount(center, radius * _player.aoe_mult, _player.damage * mult, opts)
 
 ## Same as area_damage() but takes an absolute damage amount instead of a
 ## multiplier on the player's damage stat — used by abilities that deal
@@ -1017,6 +1020,9 @@ func area_damage_amount(center: Vector2, radius: float, dmg: float, opts: Dictio
 ## every foe within `width`/2 of the segment from origin along dir for length.
 func line_damage(origin: Vector2, dir: Vector2, length: float, width: float, dmg: float, opts: Dictionary) -> void:
 	var d := dir.normalized()
+	# Reach passive widens (and slightly lengthens) piercing lines too.
+	width *= _player.aoe_mult
+	length *= 1.0 + (_player.aoe_mult - 1.0) * 0.5
 	var crit: bool = opts.get("crit", false)
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var off: Vector2 = e.global_position - origin
@@ -1128,7 +1134,8 @@ func _build_level_cards(opts: Array) -> void:
 func _level_card(opt: Dictionary) -> Control:
 	var def: Dictionary = opt["ability"]
 	var is_new: bool = opt["is_new"]
-	var accent: Color = UiTheme.GOLD if is_new else UiTheme.XP_COLOR
+	var is_evo: bool = opt.get("is_evo", false)
+	var accent: Color = UiTheme.GOLD_BRIGHT if is_evo else (UiTheme.GOLD if is_new else UiTheme.XP_COLOR)
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var cs := StyleBoxFlat.new()
@@ -1165,7 +1172,7 @@ func _level_card(opt: Dictionary) -> Control:
 	UiTheme.style_heading(name_lbl, accent, 15)
 	title_row.add_child(name_lbl)
 	var tag_lbl := Label.new()
-	tag_lbl.text = "New" if is_new else "Rank %d → %d" % [opt["next_rank"] - 1, opt["next_rank"]]
+	tag_lbl.text = "Evolved" if is_evo else ("New" if is_new else "Rank %d → %d" % [opt["next_rank"] - 1, opt["next_rank"]])
 	tag_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UiTheme.style_muted(tag_lbl, 11)
 	title_row.add_child(tag_lbl)
@@ -1747,6 +1754,77 @@ func _run_juicetest() -> void:
 	var feedback_ok := world.get_child_count() > before_children
 	print("[JUICETEST] testing_noop=%s dipped=%s restored=%s kb_set=%s feedback_ok=%s time_scale=%.2f" % [
 		str(testing_noop), str(dipped), str(restored), str(kb_set), str(feedback_ok), Engine.time_scale])
+	get_tree().quit(0)
+
+# Verifies build-variety plumbing: the level-up roll mixes abilities + passives
+# under the passive cap, each passive moves the matching Player stat in the right
+# direction, and the Reach passive's aoe_mult actually widens area_damage.
+func _run_buildtest() -> void:
+	_testing = true
+	_begin_run(DEFAULT_TEST_CLASS, "", "forest", "tier1")
+	await get_tree().process_frame
+
+	# 1) Roll composition: passives are present but capped, abilities still fill.
+	var opts := Abilities.roll("knight", {}, 5, 2)
+	var n_pass := 0
+	for o in opts:
+		if o["ability"]["mech"] == "stat": n_pass += 1
+	var cap_ok: bool = opts.size() == 5 and n_pass <= 2 and n_pass >= 1
+
+	# 2) Each passive moves its stat the right way (one incremental pick).
+	var b_dmg := _player.damage
+	var b_cd := _player.cooldown_mult
+	var b_aoe := _player.aoe_mult
+	var b_crit := _player.crit
+	var b_cmult := _player.crit_mult
+	var b_move := _player.move_speed
+	var b_hp := _player.max_hp
+	var b_xp := _player.fortune_xp
+	var b_gold := _player.fortune_gold
+	for ps in Abilities.passives():
+		_player.apply_pick({"ability": ps, "is_new": true, "next_rank": 1})
+	var stats_ok: bool = _player.damage > b_dmg and _player.cooldown_mult < b_cd \
+		and _player.aoe_mult > b_aoe and _player.crit > b_crit and _player.crit_mult > b_cmult \
+		and _player.move_speed > b_move and _player.max_hp > b_hp \
+		and _player.fortune_xp > b_xp and _player.fortune_gold > b_gold
+
+	# 3) Reach: an enemy just outside the base blast radius (accounting for the
+	#    enemy's own radius) is spared at neutral aoe_mult but struck once boosted.
+	var center := _player.global_position
+	var far := add_enemy("skeleton", center, 1.0)
+	var off_d: float = 50.0 + far.radius + 8.0   # base 50+r misses by 8; 65+r hits
+	far.global_position = center + Vector2(off_d, 0.0)
+	_player.aoe_mult = 1.0
+	area_damage(center, 50.0, 1.0, {})           # 50+r < off_d → miss
+	var missed_at_1: bool = is_equal_approx(far.hp, far.max_hp)
+	_player.aoe_mult = 1.3
+	area_damage(center, 50.0, 1.0, {})           # 65+r > off_d → hit
+	var hit_at_boost: bool = far.hp < far.max_hp
+
+	# 4) Evolution: with the base ability maxed and its passive at threshold, a
+	#    golden evo card is offered; applying it swaps the base skill for the evo.
+	var owned := {"kn_whirl": 5, "ps_might": 3}
+	var evo_offered := false
+	var evo_opt := {}
+	for o in Abilities.roll("knight", owned, 8, 2):
+		if o.get("is_evo", false) and o["ability"]["id"] == "kn_whirl_evo":
+			evo_offered = true; evo_opt = o
+	# Not offered before the pairing is met (base not maxed).
+	var evo_gated := true
+	for o in Abilities.roll("knight", {"kn_whirl": 2, "ps_might": 3}, 8, 2):
+		if o.get("is_evo", false): evo_gated = false
+	_player.apply_pick({"ability": Abilities.by_id("kn_whirl"), "is_new": true, "next_rank": 5})
+	if not evo_opt.is_empty():
+		_player.apply_pick(evo_opt)
+	var has_evo := false
+	var base_gone := true
+	for s in _player.skills:
+		if s["id"] == "kn_whirl_evo": has_evo = true
+		if s["id"] == "kn_whirl": base_gone = false
+	var evo_ok: bool = evo_offered and evo_gated and has_evo and base_gone
+
+	print("[BUILDTEST] cap_ok=%s passives=%d stats_ok=%s reach_miss=%s reach_hit=%s evo_ok=%s cd_mult=%.2f" % [
+		str(cap_ok), n_pass, str(stats_ok), str(missed_at_1), str(hit_at_boost), str(evo_ok), _player.cooldown_mult])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,
