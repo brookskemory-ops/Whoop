@@ -7,6 +7,8 @@ const DEFAULT_TEST_CLASS := "knight"
 
 var _selected_class := "knight"
 var _selected_weapon := "arming_sword"
+var _selected_stage := "forest"   # both default to always-unlocked picks
+var _selected_tier := "tier1"
 var _menu_ui: CanvasLayer
 
 var _win_time := 600.0
@@ -109,6 +111,8 @@ func _ready() -> void:
 		_run_stagetest()
 	elif _has_flag("--shoptest"):
 		_run_shoptest()
+	elif _has_flag("--progresstest"):
+		_run_progresstest()
 	else:
 		_show_title()
 
@@ -423,10 +427,10 @@ func _show_class_select() -> void:
 	var back_btn := _make_button("Back")
 	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_title())
 	vbox.add_child(back_btn)
-	var begin_btn := _make_button("Begin", true)
-	begin_btn.disabled = not (GameSave.class_unlocked(_selected_class) and GameSave.weapon_unlocked(_selected_weapon))
-	begin_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _begin_run(_selected_class, _selected_weapon))
-	vbox.add_child(begin_btn)
+	var next_btn := _make_button("Next", true)
+	next_btn.disabled = not (GameSave.class_unlocked(_selected_class) and GameSave.weapon_unlocked(_selected_weapon))
+	next_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_trial_select())
+	vbox.add_child(next_btn)
 
 func _pick_class(cid: String) -> void:
 	GameAudio.sfx("uiClick")
@@ -446,6 +450,117 @@ func _lock_text(u: Dictionary) -> String:
 		"gold": return "Buy for %d gold" % int(u["cost"])
 		"achievement": return GameData.achievement_by_id(u["achievement"])["name"]
 	return "Locked"
+
+# ── Choose Your Trial: pick the stage (Realm) + difficulty (Oath) ──────────────
+func _show_trial_select() -> void:
+	# Clamp selection to what's actually unlocked (forest/tier1 always are).
+	if not GameSave.stage_unlocked(_selected_stage):
+		_selected_stage = "forest"
+	if not GameSave.tier_unlocked(_selected_tier):
+		_selected_tier = "tier1"
+
+	var vbox := _menu_base()
+	var hdr := Label.new(); hdr.text = "Choose Your Trial"; hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_title(hdr, 22)
+	vbox.add_child(hdr)
+
+	var realm_hdr := Label.new(); realm_hdr.text = "Realm"
+	UiTheme.style_heading(realm_hdr, UiTheme.GOLD_BRIGHT, 14)
+	vbox.add_child(realm_hdr)
+	for stage in GameData.STAGES:
+		var sid: String = stage["id"]
+		var unlocked := GameSave.stage_unlocked(sid)
+		var card := Button.new()
+		card.theme = _ui_theme
+		card.custom_minimum_size = Vector2(0, 70)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.disabled = not unlocked
+		UiTheme.accent_button_style(card, UiTheme.GOLD, unlocked and sid == _selected_stage)
+		if unlocked:
+			card.pressed.connect(func(): GameAudio.sfx("uiClick"); _selected_stage = sid; _show_trial_select())
+		var col := VBoxContainer.new()
+		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		col.set_anchors_preset(Control.PRESET_FULL_RECT)
+		col.offset_left = 14; col.offset_right = -14; col.offset_top = 8; col.offset_bottom = 8
+		col.add_theme_constant_override("separation", 2)
+		card.add_child(col)
+		var name_lbl := Label.new()
+		name_lbl.text = stage["name"]
+		name_lbl.clip_text = true
+		UiTheme.style_heading(name_lbl, UiTheme.GOLD_BRIGHT if unlocked else UiTheme.MUTED, 16)
+		col.add_child(name_lbl)
+		var sub := Label.new()
+		if unlocked:
+			sub.text = stage.get("blurb", "")
+		else:
+			var prev: Dictionary = GameData.stage_by_id(stage["unlock"].get("stage", ""))
+			sub.text = "Locked — clear %s first" % prev.get("name", "the previous realm")
+		sub.clip_text = true
+		UiTheme.style_muted(sub, 12)
+		col.add_child(sub)
+		vbox.add_child(card)
+
+	vbox.add_child(_spacer(Ui.SP_S))
+	var oath_hdr := Label.new(); oath_hdr.text = "Oath"
+	UiTheme.style_heading(oath_hdr, UiTheme.GOLD_BRIGHT, 14)
+	vbox.add_child(oath_hdr)
+	var tier_row := HBoxContainer.new()
+	tier_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(tier_row)
+	for tier in GameData.DIFFICULTIES:
+		var tid: String = tier["id"]
+		var tun := GameSave.tier_unlocked(tid)
+		var chip := Button.new()
+		chip.theme = _ui_theme
+		chip.custom_minimum_size = Vector2(0, 46)
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.clip_text = true
+		chip.add_theme_font_size_override("font_size", 13)
+		chip.text = tier["name"] if tun else "Locked"
+		chip.disabled = not tun
+		if tun and tid == _selected_tier:
+			chip.theme_type_variation = "PrimaryButton"
+		if tun:
+			chip.pressed.connect(func(): GameAudio.sfx("uiClick"); _selected_tier = tid; _show_trial_select())
+		tier_row.add_child(chip)
+	var summary := Label.new()
+	summary.text = _tier_summary(GameData.difficulty_by_id(_selected_tier))
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD
+	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_muted(summary, 13)
+	vbox.add_child(summary)
+	if not GameSave.tier_unlocked(GameData.DIFFICULTIES[GameData.DIFFICULTIES.size() - 1]["id"]):
+		var hint := Label.new()
+		hint.text = "Clear every realm at your current Oath to swear a harder one."
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UiTheme.style_muted(hint, 11)
+		vbox.add_child(hint)
+
+	vbox.add_child(_spacer(Ui.SP_M))
+	var back_btn := _make_button("Back")
+	back_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _show_class_select())
+	vbox.add_child(back_btn)
+	var begin_btn := _make_button("Begin", true)
+	begin_btn.pressed.connect(func(): GameAudio.sfx("uiClick"); _begin_run(_selected_class, _selected_weapon, _selected_stage, _selected_tier))
+	vbox.add_child(begin_btn)
+
+func _tier_summary(tier: Dictionary) -> String:
+	if tier.is_empty():
+		return ""
+	var hp := int(round((float(tier.get("hp_mult", 1.0)) - 1.0) * 100.0))
+	var dmg := int(round((float(tier.get("dmg_mult", 1.0)) - 1.0) * 100.0))
+	var sp := int(round((float(tier.get("spawn_mult", 1.0)) - 1.0) * 100.0))
+	var s := "Baseline threat."
+	if hp > 0 or dmg > 0 or sp > 0:
+		s = "Enemies +%d%% HP, +%d%% damage, +%d%% spawns." % [hp, dmg, sp]
+	var ue: Array = tier.get("unlocks_enemy", [])
+	if not ue.is_empty():
+		var names := []
+		for k in ue:
+			names.append(str(k).capitalize() + "s")
+		s += "  " + " & ".join(names) + " stalk this Oath."
+	return s
 
 func _show_shop() -> void:
 	var vbox := _menu_base()
@@ -703,7 +818,8 @@ func _process(delta: float) -> void:
 		_spawn_timer -= delta
 		# Softened from max(0.16, 1.1 - elapsed*0.01): starts slower (1.4s vs
 		# 1.1s) and takes ~2.5min instead of ~1.5min to reach a (slower) floor.
-		var interval: float = max(0.22, 1.4 - elapsed * 0.008)
+		# Higher difficulty tiers tighten the interval (spawn_mult > 1).
+		var interval: float = max(0.22, 1.4 - elapsed * 0.008) / float(_active_tier.get("spawn_mult", 1.0))
 		if _spawn_timer <= 0.0:
 			_spawn_enemy()
 			_spawn_timer = interval
@@ -800,6 +916,13 @@ func _weighted_archetype(m: float) -> String:
 		["shooter", maxf(0.0, m - 1.3) * 1.2], ["exploder", maxf(0.0, m - 1.8) * 1.1],
 		["splitter", maxf(0.0, m - 2.3)], ["charger", maxf(0.0, m - 2.8)],
 	]
+	# Roster gate: chargers/splitters only stalk tiers that unlock them, so lower
+	# difficulties stay a gentler mix (not just weaker numbers).
+	var gated := ["charger", "splitter"]
+	var allowed: Array = _active_tier.get("unlocks_enemy", [])
+	for c in choices:
+		if gated.has(c[0]) and not allowed.has(c[0]):
+			c[1] = 0.0
 	var total := 0.0
 	for c in choices: total += c[1]
 	var roll := randf() * total
@@ -813,6 +936,10 @@ func _weighted_archetype(m: float) -> String:
 func add_enemy(key: String, pos: Vector2, scale_mult: float) -> Node:
 	var e := preload("res://scripts/Enemy.gd").new()
 	e.setup(key, scale_mult)
+	# Difficulty tier scales enemy durability + damage on top of the in-run ramp
+	# (applies to bosses too, since they spawn through here).
+	e.hp *= float(_active_tier.get("hp_mult", 1.0)); e.max_hp = e.hp
+	e.dmg *= float(_active_tier.get("dmg_mult", 1.0))
 	e.global_position = pos
 	_world.add_child(e)
 	return e
@@ -1320,13 +1447,26 @@ func _end_run(title: String, won: bool = false) -> void:
 	if won:
 		GameAudio.sfx("levelup")
 	var fresh := _check_run_achievements()
+	# Winning clears the stage at the chosen tier; surface anything it unlocks.
+	var unlock_lines: Array = []
+	if won:
+		var before_stage := {}
+		for s in GameData.STAGES:
+			before_stage[s["id"]] = GameSave.stage_unlocked(s["id"])
+		var before_tier: String = GameSave.unlocked_tier
+		GameSave.mark_stage_cleared(_active_stage["id"], _active_tier["id"])
+		for s in GameData.STAGES:
+			if not before_stage[s["id"]] and GameSave.stage_unlocked(s["id"]):
+				unlock_lines.append("New Realm — %s" % s["name"])
+		if GameSave.unlocked_tier != before_tier:
+			unlock_lines.append("New Oath — %s" % GameData.difficulty_by_id(GameSave.unlocked_tier).get("name", ""))
 	GameSave.gold += int(floor(run_gold))
 	GameSave.total_kills += run_kills
 	GameSave.class_kills[_player.cls_id] = int(GameSave.class_kills.get(_player.cls_id, 0)) + run_kills
 	if elapsed > GameSave.best_time:
 		GameSave.best_time = elapsed
 	GameSave.save_data()
-	_show_end_screen(title, fresh)
+	_show_end_screen(title, fresh, unlock_lines)
 
 func _check_run_achievements() -> Array:
 	var merged_kills: Dictionary = GameSave.class_kills.duplicate()
@@ -1342,7 +1482,7 @@ func _check_run_achievements() -> Array:
 		GameSave.apply_unlock(id)
 	return fresh
 
-func _show_end_screen(title: String, fresh: Array) -> void:
+func _show_end_screen(title: String, fresh: Array, unlock_lines: Array = []) -> void:
 	var won := title == "Victory!"
 	var o := Ui.overlay(self, _ui_theme, true, true)
 	_end_ui = o["layer"]
@@ -1364,6 +1504,12 @@ func _show_end_screen(title: String, fresh: Array) -> void:
 	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiTheme.style_muted(stats, Ui.BODY)
 	vbox.add_child(stats)
+	if not unlock_lines.is_empty():
+		vbox.add_child(_spacer(Ui.SP_S))
+		var ol := Label.new(); ol.text = "\n".join(unlock_lines)
+		ol.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UiTheme.style_heading(ol, UiTheme.GOLD_BRIGHT, 15)
+		vbox.add_child(ol)
 	if not fresh.is_empty():
 		vbox.add_child(_spacer(Ui.SP_S))
 		var lines := ["Unlocked!"]
@@ -1518,6 +1664,36 @@ func _run_shoptest() -> void:
 	var no_cross_seed := GameSave.class_upgrades.is_empty()
 	print("[SHOPTEST] knight_hp=%.0f(base %.0f) archer_hp=%.0f(base %.0f) knight_boosted=%s archer_unaffected=%s no_cross_seed=%s" % [
 		kn_hp, kn_base, ar_hp, ar_base, str(knight_boosted), str(archer_unaffected), str(no_cross_seed)])
+	get_tree().quit(0)
+
+# Verifies the stage/difficulty progression loop: unlock gating, tier
+# advancement, tier stat-scaling, and the tier roster gate.
+func _run_progresstest() -> void:
+	GameSave.stage_clears = {}
+	GameSave.unlocked_tier = "tier1"
+	var dungeon_locked_init := not GameSave.stage_unlocked("dungeon")
+	GameSave.mark_stage_cleared("forest", "tier1")
+	var dungeon_unlocked := GameSave.stage_unlocked("dungeon")
+	GameSave.mark_stage_cleared("dungeon", "tier1")   # all stages cleared @ tier1
+	var tier2_unlocked := GameSave.tier_unlocked("tier2")
+	# Stat scaling: same archetype is tougher under tier3 than tier1.
+	_active_tier = GameData.difficulty_by_id("tier1")
+	var e1 := add_enemy("skeleton", Vector2.ZERO, 1.0)
+	var hp1: float = e1.hp; var dmg1: float = e1.dmg
+	_active_tier = GameData.difficulty_by_id("tier3")
+	var e3 := add_enemy("skeleton", Vector2(40, 0), 1.0)
+	var scaled: bool = e3.hp > hp1 and e3.dmg > dmg1
+	# Roster gate: chargers never appear at tier1, do at tier3.
+	_active_tier = GameData.difficulty_by_id("tier1")
+	var t1_charger := false
+	for i in 500:
+		if _weighted_archetype(6.0) == "charger": t1_charger = true; break
+	_active_tier = GameData.difficulty_by_id("tier3")
+	var t3_charger := false
+	for i in 500:
+		if _weighted_archetype(6.0) == "charger": t3_charger = true; break
+	print("[PROGRESSTEST] dungeon_locked_init=%s dungeon_unlocked=%s tier2_unlocked=%s scaled=%s t1_charger=%s t3_charger=%s" % [
+		str(dungeon_locked_init), str(dungeon_unlocked), str(tier2_unlocked), str(scaled), str(t1_charger), str(t3_charger)])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,
