@@ -16,19 +16,26 @@ const BORDER := Color("463b2a")
 const BLOOD := Color("b5413a")
 const DARK_TEXT := Color("1a1308")
 
-# Medieval serif type: Cinzel (engraved Roman caps) for titles/headings/buttons,
-# EB Garamond (old-style serif) for body text. Loaded lazily + cached.
-static var _title_font: FontFile
-static var _body_font: FontFile
+# Medieval serif type. Cinzel (engraved Roman caps) is reserved for TITLES only;
+# everything else — buttons, headings, body — uses EB Garamond in clean mixed
+# case. Both are variable fonts wrapped in a FontVariation so we can pick a
+# solid weight (the raw variable default renders thin) for crisp, clean text.
+static var _title_font: FontVariation
+static var _body_font: FontVariation
 
-static func title_font() -> FontFile:
+static func title_font() -> Font:
 	if _title_font == null:
-		_title_font = load("res://assets/fonts/Cinzel.ttf")
+		_title_font = FontVariation.new()
+		_title_font.base_font = load("res://assets/fonts/Cinzel.ttf")
+		_title_font.variation_opentype = {"wght": 600}
+		_title_font.spacing_glyph = 1
 	return _title_font
 
-static func body_font() -> FontFile:
+static func body_font() -> Font:
 	if _body_font == null:
-		_body_font = load("res://assets/fonts/EBGaramond.ttf")
+		_body_font = FontVariation.new()
+		_body_font.base_font = load("res://assets/fonts/EBGaramond.ttf")
+		_body_font.variation_opentype = {"wght": 540}
 	return _body_font
 
 static func panel_style(margin: int = 14) -> StyleBoxFlat:
@@ -83,8 +90,8 @@ static func build() -> Theme:
 	theme.set_color("font_hover_color", "Button", INK)
 	theme.set_color("font_pressed_color", "Button", GOLD_BRIGHT)
 	theme.set_color("font_disabled_color", "Button", MUTED)
-	theme.set_font("font", "Button", title_font())   # engraved-caps look on buttons
-	theme.set_font_size("font_size", "Button", 17)
+	theme.set_font("font", "Button", body_font())   # clean mixed-case labels
+	theme.set_font_size("font_size", "Button", 15)
 
 	# Primary CTA button (New Run / Begin / Resume) — same ornate frame with a
 	# warm gold wash and bright-gold engraved text so it reads as the CTA.
@@ -132,7 +139,7 @@ static func style_muted(lbl: Label, size: int = 13) -> void:
 
 static func style_heading(lbl: Label, color: Color = GOLD, size: int = 20) -> void:
 	lbl.add_theme_color_override("font_color", color)
-	lbl.add_theme_font_override("font", title_font())
+	lbl.add_theme_font_override("font", body_font())   # mixed-case heading, not caps
 	lbl.add_theme_font_size_override("font_size", size)
 
 # Per-instance accent-bordered panel style for a Button (class cards / chips).

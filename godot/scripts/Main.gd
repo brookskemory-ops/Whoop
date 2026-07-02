@@ -347,7 +347,7 @@ func _show_class_select() -> void:
 		var accent := Color(c["color"])
 		var b := Button.new()
 		b.theme = _ui_theme
-		b.custom_minimum_size = Vector2(196, 104)
+		b.custom_minimum_size = Vector2(196, 112)
 		b.text = ""
 		UiTheme.accent_button_style(b, accent, cid == _selected_class)
 		b.pressed.connect(_pick_class.bind(cid))
@@ -378,9 +378,8 @@ func _show_class_select() -> void:
 
 		var name_lbl := Label.new()
 		name_lbl.text = c["name"]
-		name_lbl.add_theme_color_override("font_color", accent if unlocked else UiTheme.MUTED)
-		name_lbl.add_theme_font_override("font", UiTheme.title_font())
-		name_lbl.add_theme_font_size_override("font_size", 17)
+		name_lbl.clip_text = true
+		UiTheme.style_heading(name_lbl, accent if unlocked else UiTheme.MUTED, 16)
 		text_col.add_child(name_lbl)
 
 		var blurb_lbl := Label.new()
@@ -406,8 +405,9 @@ func _show_class_select() -> void:
 		var wb := Button.new()
 		wb.theme = _ui_theme
 		wb.custom_minimum_size = Vector2(190, 52)
-		wb.add_theme_font_size_override("font_size", 14)
-		wb.text = w["name"] if wun else "(Locked) %s" % w["name"]
+		wb.add_theme_font_size_override("font_size", 13)
+		wb.clip_text = true
+		wb.text = w["name"] if wun else "%s (locked)" % w["name"]
 		if wid == _selected_weapon and wun:
 			wb.theme_type_variation = "PrimaryButton"
 		wb.disabled = not wun
@@ -494,12 +494,9 @@ func _show_shop() -> void:
 		var lvl: int = GameSave.get_class_upgrade(_selected_class, id)
 		var maxed: bool = lvl >= int(t["max"])
 		var cost := GameData.upgrade_cost(id, lvl)
-		var row := _make_button("")
-		row.custom_minimum_size = Vector2(400, 70)
-		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		row.add_theme_font_size_override("font_size", 15)
-		row.disabled = maxed or GameSave.gold < cost
-		row.text = "%s   Lv %d/%d — %s\n%s" % [t["name"], lvl, t["max"], GameData.upgrade_desc(id, lvl), ("Maxed" if maxed else "%d gold" % cost)]
+		var detail := "Lv %d/%d  ·  %s" % [lvl, int(t["max"]), GameData.upgrade_desc(id, lvl)]
+		var value := "Maxed" if maxed else "%d g" % cost
+		var row := Ui.stat_row(t["name"], detail, value, not (maxed or GameSave.gold < cost))
 		row.pressed.connect(_buy_upgrade.bind(id))
 		vbox.add_child(row)
 
@@ -528,9 +525,7 @@ func _show_shop() -> void:
 	vbox.add_child(back_btn)
 
 func _shop_unlock_row(vbox: VBoxContainer, label: String, cost: int, handler: Callable) -> void:
-	var b := _make_button("%s — %d gold" % [label, cost])
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.disabled = GameSave.gold < cost
+	var b := Ui.stat_row(label, "", "%d g" % cost, GameSave.gold >= cost)
 	b.pressed.connect(handler)
 	vbox.add_child(b)
 
@@ -965,55 +960,77 @@ func _open_level_up() -> void:
 	get_tree().paused = false
 
 func _build_level_cards(opts: Array) -> void:
-	var o := Ui.overlay(self, _ui_theme, true, true)
+	var o := Ui.overlay(self, _ui_theme, true, false)   # scrollable: never clip cards
 	_level_ui = o["layer"]
 	var p := Ui.panel(true)
 	o["column"].add_child(p["panel"])
 	var vbox: VBoxContainer = p["column"]
-	vbox.custom_minimum_size = Vector2(336, 0)
 	vbox.add_theme_constant_override("separation", Ui.SP_M)
 	vbox.add_child(Ui.header("Level Up", Ui.H1))
-	vbox.add_child(Ui.header("Level %d" % _player.level, Ui.SMALL, UiTheme.MUTED))
+	vbox.add_child(Ui.body("Level %d" % _player.level, Ui.SMALL, true))
 	for opt in opts:
-		var def: Dictionary = opt["ability"]
-		var b := Button.new()
-		b.text = ""
-		b.custom_minimum_size = Vector2(0, 68)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiTheme.accent_button_style(b, UiTheme.GOLD if opt["is_new"] else UiTheme.XP_COLOR, false)
-		b.pressed.connect(_pick_ability.bind(opt))
-		vbox.add_child(b)
+		vbox.add_child(_level_card(opt))
 
-		var row := HBoxContainer.new()
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.set_anchors_preset(Control.PRESET_FULL_RECT)
-		row.offset_left = 12; row.offset_top = 8; row.offset_right = -12; row.offset_bottom = -8
-		row.add_theme_constant_override("separation", 10)
-		b.add_child(row)
+# One ability choice, built as a content-sized accent panel with a transparent
+# click target on top — so the card grows to fit the description (short or long)
+# instead of clipping it inside a fixed-height button.
+func _level_card(opt: Dictionary) -> Control:
+	var def: Dictionary = opt["ability"]
+	var is_new: bool = opt["is_new"]
+	var accent: Color = UiTheme.GOLD if is_new else UiTheme.XP_COLOR
+	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color(UiTheme.STONE2.r, UiTheme.STONE2.g, UiTheme.STONE2.b, 0.92)
+	cs.border_color = accent
+	cs.set_border_width_all(1)
+	cs.set_corner_radius_all(6)
+	cs.set_content_margin_all(10)
+	card.add_theme_stylebox_override("panel", cs)
 
-		var icon := TextureRect.new()
-		var icon_path := "res://assets/icons/abilities/%s.png" % def.get("icon_key", def["mech"])
-		if ResourceLoader.exists(icon_path):
-			icon.texture = load(icon_path)
-		icon.modulate = Color(def["color"])
-		icon.custom_minimum_size = Vector2(36, 36)
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		row.add_child(icon)
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 10)
+	card.add_child(row)
+	var icon := TextureRect.new()
+	var icon_path := "res://assets/icons/abilities/%s.png" % def.get("icon_key", def["mech"])
+	if ResourceLoader.exists(icon_path):
+		icon.texture = load(icon_path)
+	icon.modulate = Color(def["color"])
+	icon.custom_minimum_size = Vector2(36, 36)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(icon)
 
-		var text_col := VBoxContainer.new()
-		text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(text_col)
-		var tag := "New" if opt["is_new"] else "Rank %d -> %d" % [opt["next_rank"] - 1, opt["next_rank"]]
-		var name_lbl := Label.new()
-		name_lbl.text = "%s  [%s]" % [def["name"], tag]
-		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-		UiTheme.style_heading(name_lbl, UiTheme.GOLD_BRIGHT if opt["is_new"] else UiTheme.XP_COLOR, 15)
-		text_col.add_child(name_lbl)
-		var desc_lbl := Label.new()
-		desc_lbl.text = Abilities.describe(def, opt["next_rank"])
-		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-		UiTheme.style_muted(desc_lbl, 12)
-		text_col.add_child(desc_lbl)
+	var text_col := VBoxContainer.new()
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_col.add_theme_constant_override("separation", 2)
+	row.add_child(text_col)
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 6)
+	text_col.add_child(title_row)
+	var name_lbl := Label.new()
+	name_lbl.text = def["name"]
+	UiTheme.style_heading(name_lbl, accent, 15)
+	title_row.add_child(name_lbl)
+	var tag_lbl := Label.new()
+	tag_lbl.text = "New" if is_new else "Rank %d → %d" % [opt["next_rank"] - 1, opt["next_rank"]]
+	tag_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UiTheme.style_muted(tag_lbl, 11)
+	title_row.add_child(tag_lbl)
+	var desc_lbl := Label.new()
+	desc_lbl.text = Abilities.describe(def, opt["next_rank"])
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	UiTheme.style_muted(desc_lbl, 12)
+	text_col.add_child(desc_lbl)
+
+	var hit := Button.new()
+	hit.set_anchors_preset(Control.PRESET_FULL_RECT)
+	for s in ["normal", "hover", "pressed", "focus", "disabled"]:
+		hit.add_theme_stylebox_override(s, StyleBoxEmpty.new())
+	hit.pressed.connect(_pick_ability.bind(opt))
+	card.add_child(hit)
+	return card
 
 func _pick_ability(opt: Dictionary) -> void:
 	GameAudio.sfx("uiClick")
@@ -1193,6 +1210,8 @@ func _build_hud() -> void:
 	_lbl_banner = Label.new()
 	_lbl_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_lbl_banner.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_lbl_banner.custom_minimum_size = Vector2(440, 0)
 	UiTheme.style_title(_lbl_banner, 24)
 	_lbl_banner.visible = false
 	topcenter.add_child(_lbl_banner)

@@ -134,12 +134,15 @@ static func _frame_style() -> StyleBoxTexture:
 	s.content_margin_top = 22; s.content_margin_bottom = 22
 	return s
 
-## Cinzel section heading.
+## Cinzel screen/dialog title (the caps accent). Everything below title level
+## uses the mixed-case body font.
 static func header(text: String, size: int = H1, color: Color = UiTheme.GOLD_BRIGHT) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiTheme.style_heading(l, color, size)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_font_override("font", UiTheme.title_font())
+	l.add_theme_font_size_override("font_size", size)
 	return l
 
 ## Body/flavor label (EB Garamond, muted).
@@ -168,12 +171,55 @@ static func spacer(h: int) -> Control:
 static func button(text: String, icon_path: String = "", primary: bool = false, min_h: int = 62) -> Button:
 	var b := Button.new()
 	b.text = text
+	b.clip_text = true   # never let a label spill past the frame
 	b.custom_minimum_size = Vector2(0, min_h)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if primary:
 		b.theme_type_variation = "PrimaryButton"
 	if icon_path != "" and ResourceLoader.exists(icon_path):
 		b.icon = load(icon_path)
+	return b
+
+## A clickable framed row with a left name + optional detail line and a
+## right-aligned value (e.g. shop upgrades: "Vigor" / "Lv 0/8 — +0 max HP" /
+## "40 gold"). The inner HBox is inset past the ornate frame caps so text never
+## collides with the border, and labels clip rather than overflow. Caller wires
+## `.pressed` and adds the returned Button to a column.
+static func stat_row(name: String, detail: String, value: String, enabled: bool = true) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, 66)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.disabled = not enabled
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 42; row.offset_right = -42   # clear the ornate side caps
+	row.offset_top = 6; row.offset_bottom = 6
+	row.add_theme_constant_override("separation", 10)
+	b.add_child(row)
+	var col := VBoxContainer.new()
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	col.add_theme_constant_override("separation", 1)
+	row.add_child(col)
+	var name_lbl := Label.new()
+	name_lbl.text = name
+	name_lbl.clip_text = true
+	UiTheme.style_heading(name_lbl, UiTheme.INK, 15)
+	col.add_child(name_lbl)
+	if detail != "":
+		var det := Label.new()
+		det.text = detail
+		det.clip_text = true
+		UiTheme.style_muted(det, 12)
+		col.add_child(det)
+	var val := Label.new()
+	val.text = value
+	val.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UiTheme.style_heading(val, UiTheme.GOLD_BRIGHT if enabled else UiTheme.MUTED, 14)
+	row.add_child(val)
 	return b
 
 ## A gold-framed value bar (HP / XP / boss). Returns {"root": Control,
