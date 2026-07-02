@@ -39,6 +39,7 @@ var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 
 # Juice: screen shake, level-up/pickup flash, torch lighting, low-HP vignette.
 var _shake := 0.0
+var _hitstop_end_ms := 0
 var _flash := 0.0
 var _torch_overlay: TextureRect
 var _flash_overlay: ColorRect
@@ -113,6 +114,8 @@ func _ready() -> void:
 		_run_shoptest()
 	elif _has_flag("--progresstest"):
 		_run_progresstest()
+	elif _has_flag("--juicetest"):
+		_run_juicetest()
 	else:
 		_show_title()
 
@@ -195,7 +198,28 @@ func _make_multistop_gradient_texture(size: Vector2, offsets: Array, colors: Arr
 	return tex
 
 func add_shake(n: float) -> void:
-	_shake = minf(16.0, _shake + n)
+	_shake = minf(20.0, _shake + n)
+
+# Brief impact freeze ("hit-stop"): dips the global time scale for a few real
+# milliseconds, restored by an ignore-time-scale timer. Skipped during headless
+# tests so it never perturbs their timing. Overlapping calls extend the freeze.
+func hitstop(dur: float, scale: float = 0.02) -> void:
+	if _testing:
+		return
+	var end := Time.get_ticks_msec() + int(dur * 1000.0)
+	if end <= _hitstop_end_ms:
+		return
+	_hitstop_end_ms = end
+	Engine.time_scale = scale
+	get_tree().create_timer(dur, true, false, true).timeout.connect(func():
+		# Only clear if this is the most recent freeze (avoids an earlier timer
+		# cutting a later, longer hit-stop short).
+		if Time.get_ticks_msec() >= _hitstop_end_ms:
+			Engine.time_scale = 1.0)
+
+# Full-screen white impact flash (boss kills / big moments).
+func impact_flash(v: float) -> void:
+	_flash = maxf(_flash, v)
 
 func _begin_run(class_id: String, weapon_id: String, stage_id: String = "forest", tier_id: String = "tier1") -> void:
 	_clear_menu()
@@ -852,7 +876,7 @@ func _update_visuals(delta: float) -> void:
 	if _flash > 0.0:
 		_flash = maxf(0.0, _flash - delta * 2.0)
 
-	_camera.offset = Vector2(randf_range(-0.5, 0.5), randf_range(-0.5, 0.5)) * _shake if _shake > 0.0 else Vector2.ZERO
+	_camera.offset = Vector2(randf_range(-0.8, 0.8), randf_range(-0.8, 0.8)) * _shake if _shake > 0.0 else Vector2.ZERO
 
 	# Torch flicker only matters on stages that actually use the overlay
 	# (see per-stage lighting in _rebuild_stage).
@@ -1694,6 +1718,35 @@ func _run_progresstest() -> void:
 		if _weighted_archetype(6.0) == "charger": t3_charger = true; break
 	print("[PROGRESSTEST] dungeon_locked_init=%s dungeon_unlocked=%s tier2_unlocked=%s scaled=%s t1_charger=%s t3_charger=%s" % [
 		str(dungeon_locked_init), str(dungeon_unlocked), str(tier2_unlocked), str(scaled), str(t1_charger), str(t3_charger)])
+	get_tree().quit(0)
+
+# Verifies the combat-juice plumbing: hit-stop is inert under _testing, actually
+# dips + restores Engine.time_scale otherwise, knockback displaces an enemy, and
+# take_damage (normal/crit/boss) runs cleanly and spawns feedback.
+func _run_juicetest() -> void:
+	_testing = true
+	var before := Engine.time_scale
+	hitstop(0.1, 0.02)
+	var testing_noop := is_equal_approx(Engine.time_scale, before)
+	_testing = false
+	hitstop(0.05, 0.02)
+	var dipped := Engine.time_scale < 0.5
+	await get_tree().create_timer(0.14, true, false, true).timeout
+	var restored := is_equal_approx(Engine.time_scale, 1.0)
+	_testing = true   # keep hit-stop inert for the rest of the checks
+	_active_tier = GameData.difficulty_by_id("tier1")
+	var e := add_enemy("skeleton", Vector2(100, 0), 1.0)
+	e.apply_knockback(Vector2.RIGHT, 300.0)
+	var kb_set: bool = e._knockback.length() > 100.0
+	var world := get_node("World")
+	var before_children := world.get_child_count()
+	e.take_damage(5.0, false)
+	add_enemy("skeleton", Vector2(120, 0), 1.0).take_damage(5.0, true)
+	add_enemy("miniboss", Vector2(200, 0), 1.0).take_damage(5.0, false)
+	await get_tree().process_frame
+	var feedback_ok := world.get_child_count() > before_children
+	print("[JUICETEST] testing_noop=%s dipped=%s restored=%s kb_set=%s feedback_ok=%s time_scale=%.2f" % [
+		str(testing_noop), str(dipped), str(restored), str(kb_set), str(feedback_ok), Engine.time_scale])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,

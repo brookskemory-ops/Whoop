@@ -23,6 +23,7 @@ var marked_mult := 1.0
 var facing := 0.0
 var telegraph := false
 var _hit_flash := 0.0
+var _knockback := Vector2.ZERO
 
 # Per-kind AI state
 var _shoot_t := 1.2
@@ -107,11 +108,16 @@ func _physics_process(delta: float) -> void:
 			elif d < 210.0: vel = -dir * base_speed * slow
 			else: vel = dir.orthogonal() * base_speed * 0.5 * slow
 			_shoot_t -= delta
+			# Telegraph the shot for its final wind-up so it can be anticipated.
+			telegraph = d < 460.0 and _shoot_t <= 0.35
 			if _shoot_t <= 0.0 and d < 460.0:
 				main.spawn_enemy_projectile(global_position, dir * 200.0, dmg, Color("9ad0ff"))
 				_shoot_t = 1.7
+				telegraph = false
 		"exploder":
 			vel = dir * base_speed * slow
+			# Arm/telegraph before the blast so the player gets a moment to react.
+			telegraph = d < radius + p.radius() + 46.0
 			if d < radius + p.radius() + 2.0:
 				hp = 0.0
 		"splitter":
@@ -151,7 +157,8 @@ func _physics_process(delta: float) -> void:
 				_atk = 2.2
 				main.add_shake(4.0)
 
-	velocity = vel
+	velocity = vel + _knockback
+	_knockback = _knockback.move_toward(Vector2.ZERO, 900.0 * delta)
 	move_and_slide()
 
 	# Contact damage (all kinds).
@@ -176,24 +183,45 @@ func take_damage(amount: float, crit: bool = false) -> void:
 	var mult := marked_mult if (main and marked_until > main.elapsed) else 1.0
 	var dealt := amount * mult
 	hp -= dealt
-	_hit_flash = 0.1
+	_hit_flash = 0.22 if crit else 0.1
 	queue_redraw()
 	GameAudio.sfx("crit" if crit else "hit")
 	if main:
-		Vfx.damage_number(main.get_node("World"), global_position, dealt, crit)
+		var world: Node = main.get_node("World")
+		Vfx.damage_number(world, global_position, dealt, crit)
+		# Hit-spark + recoil so strikes read with impact.
+		Vfx.burst(world, global_position, Color(1, 1, 1) if crit else color,
+			10 if crit else 5, 260.0 if crit else 150.0, 0.28, 3.5 if crit else 2.4)
+		var players := get_tree().get_nodes_in_group("player")
+		if not players.is_empty() and hp > 0.0:
+			var away: Vector2 = (global_position - players[0].global_position)
+			if away.length() > 0.5:
+				var force := (220.0 if crit else 120.0) * (0.12 if is_boss else 1.0)
+				apply_knockback(away.normalized(), force)
+		# Emphasis only on meaningful hits, so a swarm doesn't rattle the screen.
+		if crit or is_boss:
+			main.add_shake(3.0 if crit else 2.0)
+			main.hitstop(0.05 if is_boss else 0.04)
 	if hp <= 0.0:
 		_die()
+
+func apply_knockback(dir: Vector2, force: float) -> void:
+	_knockback = dir.normalized() * force
 
 func _die() -> void:
 	var main := get_tree().current_scene
 	if main == null or not is_instance_valid(self):
 		return
 	GameAudio.sfx("enemyDie")
-	main.add_shake(6.0 if is_boss else 1.5)
+	main.add_shake(9.0 if is_boss else 1.8)
 	var world: Node = main.get_node("World")
-	Vfx.burst(world, global_position, color, 22 if is_boss else 9, 90.0 if is_boss else 150.0, 0.6 if is_boss else 0.35, 5.0 if is_boss else 3.0)
+	Vfx.burst(world, global_position, color, 28 if is_boss else 11, 90.0 if is_boss else 170.0, 0.6 if is_boss else 0.35, 5.0 if is_boss else 3.0)
 	if is_boss:
-		Vfx.ring(world, global_position, color, radius * 2.2, 0.5)
+		# A death "finisher": freeze-frame + white flash + a big double ring.
+		main.hitstop(0.15, 0.04)
+		main.impact_flash(0.7)
+		Vfx.ring(world, global_position, Color(1, 1, 1), radius * 1.6, 0.35)
+		Vfx.ring(world, global_position, color, radius * 2.4, 0.55)
 	# Death effects (onEnemyDeath in js/enemies.js).
 	if kind == "exploder":
 		main.hurt_area(global_position, 64.0, dmg)
