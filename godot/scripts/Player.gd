@@ -273,7 +273,12 @@ func take_damage(amount: float) -> void:
 	_hurt_t = 0.3
 	var main := get_tree().current_scene
 	if main and main.has_method("add_shake"):
-		main.add_shake(7.0)
+		# Taking damage should read as a real jolt, not blend into the swarm.
+		main.add_shake(10.0)
+		if main.has_method("hitstop"):
+			main.hitstop(0.06, 0.03)
+		if main.has_method("impact_flash"):
+			main.impact_flash(0.35)
 	GameAudio.sfx("hurt")
 	if hp <= 0.0:
 		died.emit()
