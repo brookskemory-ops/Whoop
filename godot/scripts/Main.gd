@@ -27,13 +27,16 @@ var _camera: Camera2D
 var _active_stage: Dictionary
 var _active_tier: Dictionary
 var _obstacles: Array = []   # [{"pos": Vector2, "radius": float}, ...] for the active stage
+var _hazards: Array = []      # StageHazard nodes for the active stage (parented to _stage_root)
 
 # Boss timeline (ported from spawnBoss/MINI_TIMES/WIN_TIME in js/game.js)
 var _boss: Node = null
 var _next_mini := 0
 var _final_spawned := false
 var _banner_text := ""
+var _banner_sub := ""
 var _banner_timer := 0.0
+var _banner_dur := 2.6
 var _end_ui: CanvasLayer
 var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 
@@ -67,6 +70,7 @@ var _boss_fill: ColorRect
 var _lbl_boss_name: Label
 var _boss_w := 280.0
 var _lbl_banner: Label
+var _lbl_banner_sub: Label
 
 # Touch / mouse joystick
 var _joy_active := false
@@ -120,6 +124,8 @@ func _ready() -> void:
 		_run_juicetest()
 	elif _has_flag("--buildtest"):
 		_run_buildtest()
+	elif _has_flag("--hazardtest"):
+		_run_hazardtest()
 	else:
 		_show_title()
 
@@ -157,6 +163,37 @@ func _rebuild_stage(stage: Dictionary) -> void:
 	# the arena/obstacles, so only torch-lit stages get it.
 	if _torch_overlay:
 		_torch_overlay.visible = stage.get("lighting", "torch") == "torch"
+
+	_scatter_hazards(stage)
+
+# Scatters the stage's environmental hazards (see GameData STAGES `hazard`) across
+# the arena — in-bounds, clear of obstacles, and away from the player's start.
+func _scatter_hazards(stage: Dictionary) -> void:
+	_hazards.clear()
+	var cfg: Dictionary = stage.get("hazard", {})
+	if cfg.is_empty():
+		return
+	var count: int = cfg.get("count", 0)
+	var half: Vector2 = stage.get("bounds", Vector2(4000, 4000)) * 0.5 - Vector2(160, 160)
+	for i in count:
+		var pos := Vector2.ZERO
+		for _try in 12:
+			pos = Vector2(randf_range(-half.x, half.x), randf_range(-half.y, half.y))
+			# Keep clear of obstacles and the spawn point at the origin.
+			if not _pos_blocked(pos) and pos.length() > 260.0:
+				break
+		var h := preload("res://scripts/StageHazard.gd").new()
+		h.global_position = pos
+		h.mode = cfg.get("type", "field")
+		h.radius = cfg.get("radius", 64.0)
+		h.dps = cfg.get("dps", 6.0)
+		h.dmg = cfg.get("dmg", 22.0)
+		h.slow_mult = cfg.get("slow_mult", 0.6)
+		h.period = cfg.get("period", 2.6)
+		h.telegraph = cfg.get("telegraph", 0.6)
+		h.color = Color(cfg.get("color", "6a9a4a"))
+		_stage_root.add_child(h)
+		_hazards.append(h)
 
 # Clamps a candidate spawn position inside the active stage's bounds and,
 # if it lands inside an obstacle, resamples the angle a few times before
@@ -260,7 +297,7 @@ func _begin_run(class_id: String, weapon_id: String, stage_id: String = "forest"
 
 	elapsed = 0.0; run_gold = 0.0; run_kills = 0; _spawn_timer = 0.0
 	_boss = null; _next_mini = 0; _final_spawned = false
-	_banner_text = ""; _banner_timer = 0.0
+	_banner_text = ""; _banner_sub = ""; _banner_timer = 0.0
 	# Force-clear the header now: a fresh player's skills list is also empty,
 	# so resetting the sig to "" alone wouldn't trigger the change-detection
 	# in _update_hud() (it'd compare "" against "" and see "no change"),
@@ -270,6 +307,9 @@ func _begin_run(class_id: String, weapon_id: String, stage_id: String = "forest"
 	_last_beat = 0.0; _shake = 0.0; _flash = 0.0
 	_state = "playing"
 	GameAudio.start_music()
+	# Narrative intro: stage name + its one-line story, held a beat longer.
+	if _active_stage.has("intro"):
+		_show_banner(_active_stage["name"], _active_stage["intro"], 3.8)
 
 func _clear_run() -> void:
 	# Free everything spawned during the run (player/enemies/gems/projectiles).
@@ -923,9 +963,11 @@ func spawn_boss(key: String) -> void:
 	Vfx.ring(_world, pos, Color("ff6a5a") if key == "finalboss" else Color("b14a8a"), 90.0, 0.6)
 	_show_banner("The Warden Awakens" if key == "finalboss" else "A Champion Approaches")
 
-func _show_banner(text: String) -> void:
+func _show_banner(text: String, sub: String = "", dur: float = 2.6) -> void:
 	_banner_text = text
-	_banner_timer = 2.6
+	_banner_sub = sub
+	_banner_dur = dur
+	_banner_timer = dur
 
 func on_boss_killed(e: Node) -> void:
 	if _boss == e:
@@ -1404,6 +1446,14 @@ func _build_hud() -> void:
 	UiTheme.style_title(_lbl_banner, 24)
 	_lbl_banner.visible = false
 	topcenter.add_child(_lbl_banner)
+	_lbl_banner_sub = Label.new()
+	_lbl_banner_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_banner_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_lbl_banner_sub.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_lbl_banner_sub.custom_minimum_size = Vector2(440, 0)
+	UiTheme.style_muted(_lbl_banner_sub, 13)
+	_lbl_banner_sub.visible = false
+	topcenter.add_child(_lbl_banner_sub)
 
 func _bar_bg_style() -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
@@ -1465,9 +1515,15 @@ func _update_hud() -> void:
 		_boss_fill.size.x = (_boss_w - 4.0) * clampf(_boss.hp / _boss.max_hp, 0.0, 1.0)
 
 	_lbl_banner.visible = _banner_timer > 0.0
+	_lbl_banner_sub.visible = _banner_timer > 0.0 and _banner_sub != ""
 	if _banner_timer > 0.0:
+		# Fade in over the first ~0.4s and out over the last ~0.5s.
+		var a := clampf(minf(_banner_timer, _banner_dur - _banner_timer + 0.1) / 0.5, 0.0, 1.0)
 		_lbl_banner.text = _banner_text
-		_lbl_banner.modulate.a = clampf(_banner_timer / 0.5, 0.0, 1.0)
+		_lbl_banner.modulate.a = a
+		if _banner_sub != "":
+			_lbl_banner_sub.text = _banner_sub
+			_lbl_banner_sub.modulate.a = a
 
 func _on_player_died() -> void:
 	if _state != "playing":
@@ -1904,6 +1960,57 @@ func _run_buildtest() -> void:
 	print("[BUILDTEST] cap_ok=%s passives=%d stats_ok=%s reach_miss=%s reach_hit=%s evo_ok=%s keystone_ok=%s evo2_ok=%s cd_mult=%.2f" % [
 		str(cap_ok), n_pass, str(stats_ok), str(missed_at_1), str(hit_at_boost), str(evo_ok),
 		str(keystone_ok), str(slam_evo_offered), _player.cooldown_mult])
+	get_tree().quit(0)
+
+# Verifies stage hazards + narrative: each stage scatters its hazards in-bounds,
+# clear of obstacles and away from the spawn; a field hazard damages + slows the
+# player; a periodic hazard telegraphs then strikes player + enemies; and the
+# stage's intro text is placed on the banner at run start.
+func _run_hazardtest() -> void:
+	_testing = true
+	var spawn_ok := true
+	var intro_ok := true
+	var field_ok := false
+	var periodic_ok := false
+	var counts := {}
+	for stage in GameData.STAGES:
+		_begin_run(DEFAULT_TEST_CLASS, "", stage["id"], "tier1")
+		await get_tree().process_frame
+		var cfg: Dictionary = stage.get("hazard", {})
+		counts[stage["id"]] = _hazards.size()
+		if _banner_text != stage["name"] or _banner_sub != stage.get("intro", ""):
+			intro_ok = false
+		if _hazards.size() != int(cfg.get("count", -1)):
+			spawn_ok = false
+		var half: Vector2 = stage["bounds"] * 0.5
+		for h in _hazards:
+			if absf(h.global_position.x) > half.x or absf(h.global_position.y) > half.y \
+				or h.global_position.length() <= 260.0 or _pos_blocked(h.global_position):
+				spawn_ok = false
+		var hz = _hazards[0]
+		if cfg.get("type", "") == "field":
+			_player.global_position = hz.global_position
+			_player.hp = _player.max_hp
+			var hp0: float = _player.hp
+			hz._tick = 0.0
+			hz._process(0.26)
+			field_ok = _player.hp < hp0 and _player._hazard_slow_secs > 0.0
+		elif cfg.get("type", "") == "periodic":
+			_player.global_position = hz.global_position
+			_player.invuln = 0.0
+			_player.hp = _player.max_hp
+			var e := add_enemy("skeleton", hz.global_position, 1.0)
+			var php0: float = _player.hp
+			var ehp0: float = e.hp
+			hz._cy = hz.period - hz.telegraph + 0.01
+			hz._process(0.02)
+			var warned: bool = hz._warning
+			hz._cy = hz.period
+			hz._process(0.02)
+			periodic_ok = warned and _player.hp < php0 and e.hp < ehp0
+	print("[HAZARDTEST] spawn_ok=%s intro_ok=%s field_dmg_slow=%s periodic_telegraph_hit=%s forest=%d dungeon=%d" % [
+		str(spawn_ok), str(intro_ok), str(field_ok), str(periodic_ok),
+		int(counts.get("forest", -1)), int(counts.get("dungeon", -1))])
 	get_tree().quit(0)
 
 # Verifies each stage's bounded arena: camera limits match stage bounds,
