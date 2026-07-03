@@ -126,6 +126,8 @@ func _ready() -> void:
 		_run_buildtest()
 	elif _has_flag("--hazardtest"):
 		_run_hazardtest()
+	elif _has_flag("--xptest"):
+		_run_xptest()
 	else:
 		_show_title()
 
@@ -1156,6 +1158,9 @@ func _open_level_up() -> void:
 		_flash = 0.5
 		GameAudio.sfx("levelup")
 		Vfx.ring(_world, _player.global_position, UiTheme.GOLD_BRIGHT, 70.0, 0.45)
+		# Each level is a small breather: heal a slice of max HP so faster leveling
+		# doubles as light sustain (standard survivors-like reward-on-level).
+		_player.hp = min(_player.max_hp, _player.hp + _player.max_hp * 0.08)
 		var opts := Abilities.roll(_player.cls_id, _player.owned_ranks(), 5)
 		if opts.is_empty():
 			_player.hp = min(_player.max_hp, _player.hp + 30.0)
@@ -1960,6 +1965,33 @@ func _run_buildtest() -> void:
 	print("[BUILDTEST] cap_ok=%s passives=%d stats_ok=%s reach_miss=%s reach_hit=%s evo_ok=%s keystone_ok=%s evo2_ok=%s cd_mult=%.2f" % [
 		str(cap_ok), n_pass, str(stats_ok), str(missed_at_1), str(hit_at_boost), str(evo_ok),
 		str(keystone_ok), str(slam_evo_offered), _player.cooldown_mult])
+	get_tree().quit(0)
+
+# Verifies the balance pass: the gentler XP curve levels faster, level-ups heal a
+# slice of max HP, and tough/boss enemies award more XP.
+func _run_xptest() -> void:
+	_testing = true
+	_auto_pick = true
+	_begin_run(DEFAULT_TEST_CLASS, "", "forest", "tier1")
+	await get_tree().process_frame
+	# Gentler curve: 50 XP reaches level 5 (was level 4 before the balance pass).
+	_player.level = 1
+	_player.xp = 0.0
+	_player.xp_next = 5.0
+	_player.gain_xp(50.0)
+	var curve_ok: bool = _player.level >= 5
+	# Heal-on-level-up: leveling from low HP restores some health.
+	_player.hp = 10.0
+	var hp0: float = _player.hp
+	_player.gain_xp(_player.xp_next)
+	await get_tree().process_frame
+	var heal_ok: bool = _player.hp > hp0
+	# Tough/boss XP bumps.
+	var xp_bump_ok: bool = float(GameData.ENEMY_BASE["miniboss"]["xp"]) >= 14.0 \
+		and float(GameData.ENEMY_BASE["finalboss"]["xp"]) >= 20.0 \
+		and float(GameData.ENEMY_BASE["charger"]["xp"]) >= 4.0
+	print("[XPTEST] curve_ok=%s heal_ok=%s xp_bump_ok=%s level=%d pickup=%.0f" % [
+		str(curve_ok), str(heal_ok), str(xp_bump_ok), _player.level, preload("res://scripts/Gem.gd").PICKUP_RANGE])
 	get_tree().quit(0)
 
 # Verifies stage hazards + narrative: each stage scatters its hazards in-bounds,

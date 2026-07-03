@@ -370,7 +370,7 @@ func gain_xp(amount: float) -> void:
 	while xp >= xp_next:
 		xp -= xp_next
 		level += 1
-		xp_next = floor(xp_next * 1.35 + 3.0)
+		xp_next = floor(xp_next * 1.28 + 3.0)
 		leveled_up.emit()
 
 func _nearest_enemy() -> Node2D:

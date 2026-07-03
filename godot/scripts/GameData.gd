@@ -188,14 +188,14 @@ func upgrade_desc(id: String, lvl: int) -> String:
 const ENEMY_BASE := {
 	"skeleton":  {"kind": "chaser",    "r": 12.0, "hp": 18.0,   "speed": 70.0,  "dmg": 8.0,  "color": "d6d3c4", "gold": 1.0,   "xp": 1.0},
 	"goblin":    {"kind": "chaser",    "r": 10.0, "hp": 12.0,   "speed": 132.0, "dmg": 6.0,  "color": "7bbf63", "gold": 1.0,   "xp": 1.0},
-	"ogre":      {"kind": "chaser",    "r": 20.0, "hp": 70.0,   "speed": 48.0,  "dmg": 16.0, "color": "9b59b6", "gold": 3.0,   "xp": 3.0},
-	"shooter":   {"kind": "shooter",   "r": 12.0, "hp": 24.0,   "speed": 64.0,  "dmg": 7.0,  "color": "6aa9ff", "gold": 2.0,   "xp": 2.0},
-	"exploder":  {"kind": "exploder",  "r": 13.0, "hp": 20.0,   "speed": 118.0, "dmg": 20.0, "color": "e8893a", "gold": 2.0,   "xp": 2.0},
-	"splitter":  {"kind": "splitter",  "r": 16.0, "hp": 42.0,   "speed": 66.0,  "dmg": 9.0,  "color": "caa24a", "gold": 2.0,   "xp": 2.0},
-	"charger":   {"kind": "charger",   "r": 15.0, "hp": 46.0,   "speed": 60.0,  "dmg": 20.0, "color": "d05a7a", "gold": 3.0,   "xp": 3.0},
+	"ogre":      {"kind": "chaser",    "r": 20.0, "hp": 70.0,   "speed": 48.0,  "dmg": 16.0, "color": "9b59b6", "gold": 3.0,   "xp": 4.0},
+	"shooter":   {"kind": "shooter",   "r": 12.0, "hp": 24.0,   "speed": 64.0,  "dmg": 7.0,  "color": "6aa9ff", "gold": 2.0,   "xp": 3.0},
+	"exploder":  {"kind": "exploder",  "r": 13.0, "hp": 20.0,   "speed": 118.0, "dmg": 20.0, "color": "e8893a", "gold": 2.0,   "xp": 3.0},
+	"splitter":  {"kind": "splitter",  "r": 16.0, "hp": 42.0,   "speed": 66.0,  "dmg": 9.0,  "color": "caa24a", "gold": 2.0,   "xp": 3.0},
+	"charger":   {"kind": "charger",   "r": 15.0, "hp": 46.0,   "speed": 60.0,  "dmg": 20.0, "color": "d05a7a", "gold": 3.0,   "xp": 4.0},
 	"spawnling": {"kind": "chaser",    "r": 7.0,  "hp": 7.0,    "speed": 150.0, "dmg": 5.0,  "color": "caa24a", "gold": 0.0,   "xp": 1.0},
-	"miniboss":  {"kind": "miniboss",  "r": 34.0, "hp": 700.0,  "speed": 44.0,  "dmg": 18.0, "color": "b14a8a", "gold": 25.0,  "xp": 8.0,  "boss": true},
-	"finalboss": {"kind": "finalboss", "r": 48.0, "hp": 2600.0, "speed": 40.0,  "dmg": 24.0, "color": "c0341f", "gold": 120.0, "xp": 10.0, "boss": true, "final": true},
+	"miniboss":  {"kind": "miniboss",  "r": 34.0, "hp": 700.0,  "speed": 44.0,  "dmg": 18.0, "color": "b14a8a", "gold": 25.0,  "xp": 16.0, "boss": true},
+	"finalboss": {"kind": "finalboss", "r": 48.0, "hp": 2600.0, "speed": 40.0,  "dmg": 24.0, "color": "c0341f", "gold": 120.0, "xp": 24.0, "boss": true, "final": true},
 }
 
 const DIR8 := ["east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"]

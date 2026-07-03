@@ -3,7 +3,7 @@ extends Node2D
 ## collected on contact. Rendered as the PixelLab arcane-gem icon with a
 ## gentle bob + spin so it reads clearly against the floor tiles.
 
-const PICKUP_RANGE := 75.0
+const PICKUP_RANGE := 150.0
 var _xp := 1.0
 var _gold := 1.0
 var radius := 5.0
@@ -32,7 +32,9 @@ func _process(delta: float) -> void:
 	var to := player.global_position - global_position
 	var d := to.length()
 	if d < PICKUP_RANGE:
-		global_position += to.normalized() * 340.0 * delta
+		# Accelerate as it nears so pickups snap in cleanly instead of loitering.
+		var pull := 260.0 + (1.0 - d / PICKUP_RANGE) * 340.0
+		global_position += to.normalized() * pull * delta
 	if d < player.radius() + radius:
 		player.gain_xp(_xp * player.fortune_xp)
 		var main := get_tree().current_scene
