@@ -30,6 +30,9 @@ var cooldown_mult := 1.0    # in-run Haste passive; <1 = faster ability/attack c
 var fire_burn_bonus := 0.0  # Kindling: burn dps applied by every fire ability
 var fire_burn_time := 0.0   # Kindling: burn duration
 var movement_nova := 0.0    # Momentum: damage mult of the on-arrival nova
+# Environmental hazard slow (stage brambles), mirrors the enemy `slow` pattern.
+var _hazard_slow_secs := 0.0
+var _hazard_slow_mult := 1.0
 
 # Permanent meta-upgrades (applied in setup() from GameSave.class_upgrades).
 var revives := 0
@@ -140,7 +143,11 @@ func _physics_process(delta: float) -> void:
 			dash = null
 	else:
 		moving = move_dir.length() > 0.1
-		velocity = move_dir.normalized() * move_speed if moving else Vector2.ZERO
+		var spd := move_speed
+		if _hazard_slow_secs > 0.0:
+			_hazard_slow_secs -= delta
+			spd *= _hazard_slow_mult
+		velocity = move_dir.normalized() * spd if moving else Vector2.ZERO
 		move_and_slide()
 
 	var foe := _nearest_enemy()
@@ -339,6 +346,24 @@ func take_damage(amount: float) -> void:
 	GameAudio.sfx("hurt")
 	if hp <= 0.0:
 		died.emit()
+
+## Light hazard DoT (stage brambles) — no i-frames, no big jolt, so a 0.25 s tick
+## while standing in a field doesn't spam the full hurt feedback. Shield still soaks.
+func hazard_tick(amount: float) -> void:
+	var dmg := amount
+	if shield > 0.0:
+		var absorb := minf(shield, dmg)
+		shield -= absorb
+		dmg -= absorb
+	hp -= dmg
+	_hurt_t = maxf(_hurt_t, 0.12)
+	if hp <= 0.0:
+		died.emit()
+
+## Apply/refresh an environmental slow (multiplier < 1) for `secs` seconds.
+func hazard_slow(mult: float, secs: float) -> void:
+	_hazard_slow_mult = mult
+	_hazard_slow_secs = maxf(_hazard_slow_secs, secs)
 
 func gain_xp(amount: float) -> void:
 	xp += amount
