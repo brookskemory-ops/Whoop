@@ -218,7 +218,7 @@ func _die() -> void:
 	Vfx.burst(world, global_position, color, 28 if is_boss else 11, 90.0 if is_boss else 170.0, 0.6 if is_boss else 0.35, 5.0 if is_boss else 3.0)
 	if is_boss:
 		# A death "finisher": freeze-frame + white flash + a big double ring.
-		main.hitstop(0.15, 0.04)
+		main.hitstop(0.15, 0.04, true)
 		main.impact_flash(0.7)
 		Vfx.ring(world, global_position, Color(1, 1, 1), radius * 1.6, 0.35)
 		Vfx.ring(world, global_position, color, radius * 2.4, 0.55)

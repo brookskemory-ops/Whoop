@@ -40,6 +40,8 @@ var _last_beat := 0.0   # low-HP heartbeat sfx throttle
 # Juice: screen shake, level-up/pickup flash, torch lighting, low-HP vignette.
 var _shake := 0.0
 var _hitstop_end_ms := 0
+var _hitstop_cd_ms := 0        # real-time gate: no new freeze until past this
+const HITSTOP_GAP_MS := 90     # forced recovery window between freezes
 var _flash := 0.0
 var _torch_overlay: TextureRect
 var _flash_overlay: ColorRect
@@ -203,21 +205,27 @@ func add_shake(n: float) -> void:
 	_shake = minf(20.0, _shake + n)
 
 # Brief impact freeze ("hit-stop"): dips the global time scale for a few real
-# milliseconds, restored by an ignore-time-scale timer. Skipped during headless
-# tests so it never perturbs their timing. Overlapping calls extend the freeze.
-func hitstop(dur: float, scale: float = 0.02) -> void:
+# milliseconds; restored from _process against the real clock. Rate-limited by a
+# real-time cooldown so a stream of crits can't keep re-triggering (and thereby
+# pinning) the freeze — each dip must fully recover before the next can start.
+# `force` bypasses the cooldown for rare big moments (boss-kill finisher). Skipped
+# during headless tests so it never perturbs their timing.
+func hitstop(dur: float, scale: float = 0.02, force: bool = false) -> void:
 	if _testing:
 		return
-	var end := Time.get_ticks_msec() + int(dur * 1000.0)
-	if end <= _hitstop_end_ms:
+	var now := Time.get_ticks_msec()
+	if not force and now < _hitstop_cd_ms:
 		return
-	_hitstop_end_ms = end
+	_hitstop_end_ms = now + int(dur * 1000.0)
+	_hitstop_cd_ms = _hitstop_end_ms + HITSTOP_GAP_MS
 	Engine.time_scale = scale
-	get_tree().create_timer(dur, true, false, true).timeout.connect(func():
-		# Only clear if this is the most recent freeze (avoids an earlier timer
-		# cutting a later, longer hit-stop short).
-		if Time.get_ticks_msec() >= _hitstop_end_ms:
-			Engine.time_scale = 1.0)
+
+# Force real time back to normal — called at any transition that pauses/leaves a
+# run, so an in-flight freeze can never survive it (belt-and-suspenders).
+func _clear_hitstop() -> void:
+	_hitstop_end_ms = 0
+	_hitstop_cd_ms = 0
+	Engine.time_scale = 1.0
 
 # Full-screen white impact flash (boss kills / big moments).
 func impact_flash(v: float) -> void:
@@ -226,6 +234,7 @@ func impact_flash(v: float) -> void:
 func _begin_run(class_id: String, weapon_id: String, stage_id: String = "forest", tier_id: String = "tier1") -> void:
 	_clear_menu()
 	_clear_run()
+	_clear_hitstop()
 
 	_active_stage = GameData.stage_by_id(stage_id)
 	if _active_stage.is_empty():
@@ -830,6 +839,11 @@ func add_kill() -> void:
 	run_kills += 1
 
 func _process(delta: float) -> void:
+	# Real-clock hit-stop recovery — runs before any early-out and reads the real
+	# clock (not the frozen game delta), so time_scale always returns to 1.0.
+	if _hitstop_end_ms > 0 and Time.get_ticks_msec() >= _hitstop_end_ms:
+		Engine.time_scale = 1.0
+		_hitstop_end_ms = 0
 	if _player == null or not is_instance_valid(_player):
 		return
 	if _state != "playing":
@@ -1110,6 +1124,7 @@ func _open_level_up() -> void:
 			_pending_levels -= 1
 			continue
 		_leveling = true
+		_clear_hitstop()   # never freeze time while the (paused) card UI is up
 		get_tree().paused = true
 		_build_level_cards(opts)
 		return
@@ -1489,6 +1504,7 @@ func _try_revive() -> bool:
 # Persists run results to GameSave (ported from the shared tail of die()/
 # victory() in js/game.js) and shows the death/victory screen.
 func _end_run(title: String, won: bool = false) -> void:
+	_clear_hitstop()
 	get_tree().paused = true
 	GameAudio.stop_music()
 	if won:
@@ -1756,6 +1772,15 @@ func _run_juicetest() -> void:
 	var dipped := Engine.time_scale < 0.5
 	await get_tree().create_timer(0.14, true, false, true).timeout
 	var restored := is_equal_approx(Engine.time_scale, 1.0)
+	# Regression for the crit slow-mo bug: a burst of hit-stops (crit spam) must
+	# not pin time_scale — the cooldown gate + _process restore recover it.
+	# Reset first so the burst's first dip is independent of the prior cooldown.
+	_clear_hitstop()
+	for i in 40:
+		hitstop(0.04, 0.02)
+	var burst_dipped := Engine.time_scale < 0.5
+	await get_tree().create_timer(0.3, true, false, true).timeout
+	var burst_restored := is_equal_approx(Engine.time_scale, 1.0)
 	_testing = true   # keep hit-stop inert for the rest of the checks
 	_active_tier = GameData.difficulty_by_id("tier1")
 	var e := add_enemy("skeleton", Vector2(100, 0), 1.0)
@@ -1768,8 +1793,8 @@ func _run_juicetest() -> void:
 	add_enemy("miniboss", Vector2(200, 0), 1.0).take_damage(5.0, false)
 	await get_tree().process_frame
 	var feedback_ok := world.get_child_count() > before_children
-	print("[JUICETEST] testing_noop=%s dipped=%s restored=%s kb_set=%s feedback_ok=%s time_scale=%.2f" % [
-		str(testing_noop), str(dipped), str(restored), str(kb_set), str(feedback_ok), Engine.time_scale])
+	print("[JUICETEST] testing_noop=%s dipped=%s restored=%s burst_dipped=%s burst_restored=%s kb_set=%s feedback_ok=%s time_scale=%.2f" % [
+		str(testing_noop), str(dipped), str(restored), str(burst_dipped), str(burst_restored), str(kb_set), str(feedback_ok), Engine.time_scale])
 	get_tree().quit(0)
 
 # Verifies build-variety plumbing: the level-up roll mixes abilities + passives
